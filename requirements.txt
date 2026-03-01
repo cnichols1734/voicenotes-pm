@@ -1,0 +1,9 @@
+flask
+flask-cors
+gunicorn
+supabase
+openai
+requests
+python-dotenv
+pydub
+pytest

@@ -1,0 +1,3 @@
+-- VoiceNotes PM - Supabase Database Schema
+-- Run this in your Supabase SQL Editor
+-- Schema will be defined in the next implementation phase
