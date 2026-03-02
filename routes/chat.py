@@ -2,6 +2,7 @@
 VoiceNotes PM - Meeting chat routes.
 Provides streaming AI chat about a specific meeting's transcript and summary.
 """
+import json
 import logging
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
@@ -89,7 +90,7 @@ def post_chat(meeting_id):
         try:
             for chunk in stream_chat_response(meeting, history, user_message):
                 full_response.append(chunk)
-                yield f"data: {chunk}\n\n"
+                yield f"data: {json.dumps(chunk)}\n\n"
         except RuntimeError as exc:
             logger.error("Chat stream error: %s", exc)
             error_msg = "Sorry, I encountered an error processing your question. Please try again."

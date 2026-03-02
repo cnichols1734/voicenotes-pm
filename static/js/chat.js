@@ -147,7 +147,12 @@ window.ChatModule = (() => {
 
                     if (data === '[DONE]') continue;
 
-                    fullText += data;
+                    // Chunks are JSON-encoded to preserve UTF-8
+                    try {
+                        fullText += JSON.parse(data);
+                    } catch (e) {
+                        fullText += data;
+                    }
                     contentEl.innerHTML = formatMarkdown(fullText);
                     scrollToBottom();
                 }
@@ -155,7 +160,12 @@ window.ChatModule = (() => {
 
             // Process any remaining buffer
             if (buffer.startsWith('data: ') && buffer.slice(6) !== '[DONE]') {
-                fullText += buffer.slice(6);
+                const remaining = buffer.slice(6);
+                try {
+                    fullText += JSON.parse(remaining);
+                } catch (e) {
+                    fullText += remaining;
+                }
                 contentEl.innerHTML = formatMarkdown(fullText);
             }
 
@@ -241,33 +251,51 @@ window.ChatModule = (() => {
     }
 
     // ---------------------------------------------------------------------------
-    // Simple markdown formatting
+    // Markdown formatting (line-by-line for reliable list handling)
     // ---------------------------------------------------------------------------
     function formatMarkdown(text) {
         if (!text) return '';
-        let html = escapeHtml(text);
 
-        // Bold: **text**
-        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        const lines = text.split('\n');
+        let html = '';
+        let inList = false;
 
-        // Italic: *text*
-        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        for (let i = 0; i < lines.length; i++) {
+            let line = escapeHtml(lines[i]);
 
-        // Inline code: `text`
-        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+            // Inline formatting
+            line = line.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+            line = line.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+            line = line.replace(/`([^`]+)`/g, '<code>$1</code>');
 
-        // Line breaks
-        html = html.replace(/\n/g, '<br>');
+            const isBullet = line.trim().match(/^[-*]\s+(.*)/);
 
-        // Bullet lists: lines starting with - or *
-        html = html.replace(/((?:^|<br>)(?:\s*[-*]\s+.+?)(?:<br>|$))+/g, (match) => {
-            const items = match
-                .split('<br>')
-                .filter(line => line.trim().match(/^[-*]\s+/))
-                .map(line => `<li>${line.trim().replace(/^[-*]\s+/, '')}</li>`)
-                .join('');
-            return items ? `<ul>${items}</ul>` : match;
-        });
+            if (isBullet) {
+                if (!inList) {
+                    html += '<ul>';
+                    inList = true;
+                }
+                html += `<li>${isBullet[1]}</li>`;
+            } else {
+                if (inList) {
+                    html += '</ul>';
+                    inList = false;
+                }
+
+                // Empty line = paragraph break
+                if (line.trim() === '') {
+                    html += '<br><br>';
+                } else {
+                    // Add line break between consecutive non-empty lines
+                    if (i > 0 && lines[i - 1].trim() !== '' && !lines[i - 1].trim().match(/^[-*]\s+/)) {
+                        html += '<br>';
+                    }
+                    html += line;
+                }
+            }
+        }
+
+        if (inList) html += '</ul>';
 
         return html;
     }
