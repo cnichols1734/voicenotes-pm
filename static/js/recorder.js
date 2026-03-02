@@ -336,7 +336,11 @@ window.RecorderModule = (() => {
     async function generateAITitle() {
         const btn = getEl('ai-title-btn');
         const input = getEl('meeting-title-input');
-        if (!btn || !input || !currentMeetingId) return;
+        if (!btn || !input) return;
+        if (!currentMeetingId) {
+            showToast('No meeting to generate title for.', 'error');
+            return;
+        }
 
         const origHTML = btn.innerHTML;
         btn.disabled = true;
@@ -348,14 +352,28 @@ window.RecorderModule = (() => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ meeting_id: currentMeetingId }),
             });
-            const data = await response.json();
+
+            let data;
+            const text = await response.text();
+            try {
+                data = JSON.parse(text);
+            } catch (parseErr) {
+                console.error('Title response not JSON:', text.slice(0, 200));
+                showToast('Failed to generate title: unexpected server response', 'error');
+                btn.disabled = false;
+                btn.innerHTML = origHTML;
+                return;
+            }
+
             if (response.ok && data.title) {
                 input.value = data.title;
                 input.focus();
+                showToast('Title generated!', 'success');
             } else {
                 showToast(data.error || 'Failed to generate title', 'error');
             }
         } catch (err) {
+            console.error('Title generation fetch error:', err);
             showToast(`Failed to generate title: ${err.message}`, 'error');
         }
 
