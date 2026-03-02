@@ -2,16 +2,18 @@
 VoiceNotes PM - Whisper transcription service.
 
 Supports two backends:
-  1. Local / self-hosted Whisper (via LM Studio, etc.) — tried first if WHISPER_BASE_URL is set
+  1. Local whisper.cpp server — tried first if WHISPER_BASE_URL is set
   2. OpenAI Whisper API — used as fallback, or as primary if no local URL configured
 
-Both backends use the OpenAI-compatible API format, so the same SDK works for both.
+The local backend uses whisper.cpp's /inference endpoint.
+The OpenAI backend uses the standard /v1/audio/transcriptions endpoint.
 """
 import io
 import logging
 import time
 
 import openai
+import requests
 
 from config import Config
 
@@ -32,27 +34,36 @@ class NamedBytesIO(io.BytesIO):
         self.name = name
 
 
-def _get_local_client():
-    """Create an OpenAI client pointed at the local Whisper endpoint."""
-    if not Config.WHISPER_BASE_URL:
-        return None
-    return openai.OpenAI(
-        api_key=Config.WHISPER_API_KEY,
-        base_url=Config.WHISPER_BASE_URL,
+def _transcribe_local(audio_bytes: bytes, file_format: str) -> str:
+    """
+    Transcribe audio using a local whisper.cpp server.
+    Uses the /inference endpoint with multipart form upload.
+    """
+    url = Config.WHISPER_BASE_URL.rstrip("/") + "/inference"
+    files = {
+        "file": (f"audio.{file_format}", audio_bytes, f"audio/{file_format}"),
+    }
+    data = {
+        "response_format": "json",
+    }
+
+    response = requests.post(
+        url,
+        files=files,
+        data=data,
         timeout=LOCAL_WHISPER_TIMEOUT,
     )
+    response.raise_for_status()
+    result = response.json()
+    return result.get("text", "").strip()
 
 
-def _get_openai_client():
-    """Create a standard OpenAI client."""
-    return openai.OpenAI(api_key=Config.OPENAI_API_KEY)
-
-
-def _transcribe_with_client(client, audio_bytes: bytes, file_format: str, model: str) -> str:
-    """Send audio to a Whisper-compatible endpoint and return transcript text."""
+def _transcribe_openai(audio_bytes: bytes, file_format: str) -> str:
+    """Transcribe audio using OpenAI Whisper API."""
+    client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
     file_obj = NamedBytesIO(audio_bytes, name=f"audio.{file_format}")
     response = client.audio.transcriptions.create(
-        model=model,
+        model="whisper-1",
         file=file_obj,
     )
     return response.text.strip()
@@ -63,7 +74,7 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> str:
     Transcribe audio using Whisper.
 
     Strategy:
-      1. If WHISPER_BASE_URL is configured, try the local/self-hosted endpoint first.
+      1. If WHISPER_BASE_URL is configured, try the local whisper.cpp server first.
       2. If local fails (connection error, timeout, etc.), fall back to OpenAI.
       3. If no local URL is configured, go straight to OpenAI.
 
@@ -79,15 +90,11 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> str:
     size_mb = len(audio_bytes) / (1024 * 1024)
 
     # --- Try local Whisper first ---
-    local_client = _get_local_client()
-    if local_client:
+    if Config.WHISPER_BASE_URL:
         try:
-            logger.info("Trying local Whisper (%.1f MB)...", size_mb)
+            logger.info("Trying local Whisper at %s (%.1f MB)...", Config.WHISPER_BASE_URL, size_mb)
             start = time.time()
-            text = _transcribe_with_client(
-                local_client, audio_bytes, file_format,
-                model="whisper-large-v3-turbo",
-            )
+            text = _transcribe_local(audio_bytes, file_format)
             elapsed = time.time() - start
             logger.info("Local Whisper succeeded in %.1fs.", elapsed)
             return text
@@ -96,12 +103,11 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> str:
 
     # --- Fallback: OpenAI Whisper API ---
     logger.info("Using OpenAI Whisper (%.1f MB)...", size_mb)
-    openai_client = _get_openai_client()
 
     # For streaming chunks (< 24 MB), send directly
     if len(audio_bytes) <= WHISPER_MAX_BYTES:
         start = time.time()
-        text = _transcribe_with_client(openai_client, audio_bytes, file_format, model="whisper-1")
+        text = _transcribe_openai(audio_bytes, file_format)
         elapsed = time.time() - start
         logger.info("OpenAI Whisper succeeded in %.1fs.", elapsed)
         return text
@@ -114,7 +120,7 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> str:
     transcripts = []
     for idx, chunk in enumerate(chunks):
         logger.info("Transcribing pydub chunk %d / %d (%.1f MB)...", idx + 1, len(chunks), len(chunk) / (1024 * 1024))
-        text = _transcribe_with_client(openai_client, chunk, file_format, model="whisper-1")
+        text = _transcribe_openai(chunk, file_format)
         transcripts.append(text)
 
     return "\n\n".join(transcripts)
