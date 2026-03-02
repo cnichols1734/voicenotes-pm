@@ -1,2 +1,55 @@
-{# VoiceNotes PM - Folder navigation partial #}
-{# Include with: {% include 'components/folder_sidebar.html' %} #}
+<!-- Folder Sidebar Component -->
+<!-- All content populated dynamically by folders.js -->
+
+<div class="sidebar-section">
+    <div class="sidebar-section-header">
+        <span class="sidebar-section-label">Meetings</span>
+    </div>
+    <button class="sidebar-item active" id="filter-all" data-filter="all">
+        <span class="sidebar-item-icon">🏠</span>
+        <span class="sidebar-item-name">All Meetings</span>
+        <span class="sidebar-item-count" id="all-meetings-count">0</span>
+    </button>
+</div>
+
+<div class="sidebar-divider"></div>
+
+<div class="sidebar-section">
+    <div class="sidebar-section-header">
+        <span class="sidebar-section-label">Folders</span>
+        <button class="sidebar-add-btn" id="create-folder-btn" title="New folder">+</button>
+    </div>
+    <div id="folders-list">
+        <!-- Populated by folders.js -->
+    </div>
+    <!-- Inline create form -->
+    <div class="sidebar-create-form" id="create-folder-form">
+        <input type="text" class="sidebar-mini-input" id="new-folder-name" placeholder="Folder name..."
+            maxlength="40" />
+        <div class="color-swatches" id="new-folder-colors">
+            <div class="color-swatch selected" data-color="#6366f1" style="background:#6366f1;"></div>
+            <div class="color-swatch" data-color="#818cf8" style="background:#818cf8;"></div>
+            <div class="color-swatch" data-color="#34d399" style="background:#34d399;"></div>
+            <div class="color-swatch" data-color="#fbbf24" style="background:#fbbf24;"></div>
+            <div class="color-swatch" data-color="#f87171" style="background:#f87171;"></div>
+            <div class="color-swatch" data-color="#a78bfa" style="background:#a78bfa;"></div>
+            <div class="color-swatch" data-color="#38bdf8" style="background:#38bdf8;"></div>
+            <div class="color-swatch" data-color="#fb923c" style="background:#fb923c;"></div>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px;">
+            <button class="btn btn-primary btn-sm" style="flex:1;" id="confirm-create-folder">Create</button>
+            <button class="btn btn-ghost btn-sm" id="cancel-create-folder">Cancel</button>
+        </div>
+    </div>
+</div>
+
+<div class="sidebar-divider"></div>
+
+<div class="sidebar-section">
+    <div class="sidebar-section-header">
+        <span class="sidebar-section-label">By Type</span>
+    </div>
+    <div class="filter-chips" id="type-filter-chips">
+        <!-- Populated by JS -->
+    </div>
+</div>

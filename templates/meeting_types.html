@@ -1,6 +1,90 @@
 {% extends "base.html" %}
-{% block title %}Meeting Types - VoiceNotes PM{% endblock %}
+{% block title %}Meeting Type Prompts - VoiceNotes PM{% endblock %}
+
 {% block content %}
-    <h1>Meeting Type Prompts</h1>
-    <p>Prompt editor will be rendered here.</p>
+<div class="meeting-types-page">
+    <div class="meeting-types-header">
+        <h1 class="text-page-title">Meeting Type Prompts</h1>
+        <p class="text-secondary" style="margin-top:6px;font-size:15px;">Customize how your meetings are summarized.
+            Each type has an AI prompt tailored to its context.</p>
+    </div>
+
+    <div class="meeting-types-grid" id="meeting-types-grid">
+        <!-- Skeleton loading cards -->
+        <div class="type-card" style="min-height:120px;">
+            <div class="skeleton" style="height:20px;width:60%;margin-bottom:8px;"></div>
+            <div class="skeleton" style="height:14px;width:90%;"></div>
+        </div>
+        <div class="type-card" style="min-height:120px;opacity:0.7;">
+            <div class="skeleton" style="height:20px;width:50%;margin-bottom:8px;"></div>
+            <div class="skeleton" style="height:14px;width:80%;"></div>
+        </div>
+        <div class="type-card" style="min-height:120px;opacity:0.4;">
+            <div class="skeleton" style="height:20px;width:70%;margin-bottom:8px;"></div>
+            <div class="skeleton" style="height:14px;width:85%;"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Edit / Create Meeting Type Modal -->
+<div class="modal-backdrop" id="type-modal">
+    <div class="modal" style="max-width:720px;">
+        <div class="modal-header">
+            <h3 class="modal-title" id="type-modal-title">Edit Meeting Type</h3>
+            <button class="modal-close" id="type-modal-close">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+            </button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="edit-type-id" />
+            <div class="form-group">
+                <label class="form-label" for="edit-type-name">Name</label>
+                <input type="text" class="form-input" id="edit-type-name" placeholder="e.g. Engineering Kickoff" />
+            </div>
+            <div class="form-group">
+                <label class="form-label">Icon</label>
+                <div class="icon-picker-grid" id="icon-picker-grid">
+                    <!-- Icons rendered by JS -->
+                </div>
+                <input type="hidden" id="edit-type-icon" value="📋" />
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="edit-type-desc">Description</label>
+                <input type="text" class="form-input" id="edit-type-desc"
+                    placeholder="Short description of this meeting type" />
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="edit-type-prompt">Prompt Template</label>
+                <div class="form-hint" style="margin-bottom:8px;">
+                    Use <code
+                        style="background:var(--bg-tertiary);padding:1px 5px;border-radius:4px;font-family:var(--font-mono);font-size:11px;">{transcript}</code>
+                    where you want the meeting transcript inserted. The model will return structured JSON.
+                </div>
+                <textarea class="form-textarea prompt-textarea" id="edit-type-prompt"
+                    placeholder="Enter your AI prompt..."></textarea>
+                <div class="char-count" id="char-count">0 characters</div>
+            </div>
+        </div>
+        <div class="modal-footer" style="justify-content:space-between;">
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-danger btn-sm hidden" id="delete-type-btn">Delete</button>
+                <button class="btn btn-secondary btn-sm hidden" id="reset-type-btn">Reset to Default</button>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <button class="btn btn-secondary" id="type-modal-cancel">Cancel</button>
+                <button class="btn btn-primary" id="save-type-btn">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    window.PAGE = 'meeting-types';
+</script>
 {% endblock %}

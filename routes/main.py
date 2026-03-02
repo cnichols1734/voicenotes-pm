@@ -1,5 +1,6 @@
 """
-Main routes - Dashboard and index.
+VoiceNotes PM - Page routes.
+Renders server-side HTML templates for each page.
 """
 from flask import Blueprint, render_template
 
@@ -12,14 +13,13 @@ def index():
     return render_template("dashboard.html")
 
 
-@main_bp.route("/recordings/<int:recording_id>")
-def recording_detail(recording_id):
+@main_bp.route("/meeting/<meeting_id>")
+def meeting_detail(meeting_id):
     """Render single meeting detail view (transcript + summary)."""
-    return render_template("recording.html", recording_id=recording_id)
+    return render_template("recording.html", meeting_id=meeting_id)
 
 
 @main_bp.route("/meeting-types")
 def meeting_types_page():
     """Render the meeting type prompt editor page."""
     return render_template("meeting_types.html")
-

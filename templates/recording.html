@@ -1,6 +1,168 @@
 {% extends "base.html" %}
-{% block title %}Recording {{ recording_id }} - VoiceNotes PM{% endblock %}
+{% block title %}Meeting Detail - VoiceNotes PM{% endblock %}
+
 {% block content %}
-    <h1>Meeting Detail</h1>
-    <p>Recording #{{ recording_id }} - transcript and summary will be rendered here.</p>
+<div class="detail-page">
+    <!-- Breadcrumb -->
+    <div class="detail-header">
+        <div class="detail-breadcrumb">
+            <a href="/">Dashboard</a>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6" />
+            </svg>
+            <span id="breadcrumb-title">Meeting</span>
+        </div>
+
+        <!-- Editable title -->
+        <h1 class="detail-title" id="meeting-title" contenteditable="true" spellcheck="false">Loading...</h1>
+
+        <div class="detail-meta" id="meeting-meta">
+            <!-- Populated by JS: type badge, folder badge, date, duration -->
+        </div>
+
+        <!-- Action bar -->
+        <div class="detail-actions">
+            <select class="form-select" id="move-folder-select" style="height:36px;width:auto;font-size:13px;"
+                title="Move to folder">
+                <option value="">Move to folder...</option>
+            </select>
+            <button class="btn btn-secondary" id="resurface-btn" title="Re-summarize meeting">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M23 4v6h-6" />
+                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                </svg>
+                Re-summarize
+            </button>
+            <button class="btn btn-secondary" id="copy-summary-btn" title="Copy summary to clipboard">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                Copy Summary
+            </button>
+            <button class="btn btn-danger btn-sm" id="delete-meeting-btn" title="Delete meeting">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                </svg>
+                Delete
+            </button>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+        <button class="tab-btn active" data-tab="summary">Summary</button>
+        <button class="tab-btn" data-tab="transcript">Transcript</button>
+    </div>
+
+    <!-- Summary Tab -->
+    <div class="tab-panel active" id="tab-summary">
+        <div id="summary-loading" style="display:flex;justify-content:center;padding:60px;">
+            <div class="spinner"></div>
+        </div>
+        <div id="summary-content" style="display:none;">
+            <!-- Executive Summary -->
+            <div class="summary-section" id="section-executive">
+                <div class="summary-section-header">
+                    <span class="summary-section-icon">📝</span>
+                    <h2 class="summary-section-title">Executive Summary</h2>
+                </div>
+                <div class="executive-summary-text" id="executive-summary-text"></div>
+            </div>
+
+            <!-- Action Items -->
+            <div class="summary-section" id="section-actions">
+                <div class="summary-section-header">
+                    <span class="summary-section-icon">✅</span>
+                    <h2 class="summary-section-title">Action Items</h2>
+                </div>
+                <div id="action-items-list"></div>
+            </div>
+
+            <!-- Decisions Made -->
+            <div class="summary-section" id="section-decisions">
+                <div class="summary-section-header">
+                    <span class="summary-section-icon">⚖️</span>
+                    <h2 class="summary-section-title">Decisions Made</h2>
+                </div>
+                <div id="decisions-list"></div>
+            </div>
+
+            <!-- Key Discussion Points -->
+            <div class="summary-section" id="section-discussion">
+                <div class="summary-section-header">
+                    <span class="summary-section-icon">💬</span>
+                    <h2 class="summary-section-title">Key Discussion Points</h2>
+                </div>
+                <ul class="summary-bullet-list" id="discussion-list"></ul>
+            </div>
+
+            <!-- Follow-ups -->
+            <div class="summary-section" id="section-followups">
+                <div class="summary-section-header">
+                    <span class="summary-section-icon">🔔</span>
+                    <h2 class="summary-section-title">Follow-ups</h2>
+                </div>
+                <ul class="summary-bullet-list followups" id="followups-list"></ul>
+            </div>
+        </div>
+
+        <div class="empty-state" id="summary-empty" style="display:none;">
+            <div class="empty-state-icon">📋</div>
+            <div class="empty-state-title">No summary yet</div>
+            <div class="empty-state-desc">Summary was not generated or the meeting is still processing.</div>
+        </div>
+    </div>
+
+    <!-- Transcript Tab -->
+    <div class="tab-panel" id="tab-transcript">
+        <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+            <button class="btn btn-secondary btn-sm" id="copy-transcript-btn">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                Copy Transcript
+            </button>
+        </div>
+        <div class="transcript-content" id="transcript-content">Loading transcript...</div>
+    </div>
+</div>
+
+<!-- Re-summarize modal -->
+<div class="modal-backdrop" id="resurface-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <h3 class="modal-title">Re-summarize Meeting</h3>
+            <button class="modal-close" id="resurface-modal-close">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+            </button>
+        </div>
+        <div class="modal-body">
+            <p class="text-secondary" style="margin-bottom:16px;">Choose a meeting type to re-run the summary with a
+                different prompt.</p>
+            <div class="meeting-type-grid" id="resurface-type-grid" style="max-height:none;"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" id="resurface-cancel-btn">Cancel</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    window.PAGE = 'detail';
+    window.MEETING_ID = '{{ meeting_id }}';
+</script>
 {% endblock %}

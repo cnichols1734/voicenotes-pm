@@ -1,11 +1,11 @@
 """
-VoiceNotes PM - Supabase client.
-Initializes and exports the Supabase client for database access.
+VoiceNotes PM - Supabase client factory.
+Returns a configured Supabase client for database access.
 """
-# Stub: Initialize Supabase client when config is available
-# from supabase import create_client
-# from config import Config
-# client = create_client(Config.SUPABASE_URL, Config.SUPABASE_KEY)
+from supabase import create_client, Client
+from config import Config
 
-# Placeholder until implemented
-client = None
+
+def get_supabase() -> Client:
+    """Create and return a Supabase client using environment-configured credentials."""
+    return create_client(Config.SUPABASE_URL, Config.SUPABASE_KEY)

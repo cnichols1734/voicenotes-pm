@@ -1,2 +1,16 @@
-{# VoiceNotes PM - Meeting list item card partial #}
-{# Include with: {% include 'components/meeting_card.html' %} #}
+<!-- Meeting Card Component Template -->
+<!-- Used as a JS template; id="meeting-card-template" -->
+<template id="meeting-card-template">
+    <button class="meeting-card" data-meeting-id="">
+        <div class="meeting-card-header">
+            <div class="meeting-card-title"></div>
+        </div>
+        <div class="meeting-card-meta">
+            <span class="badge badge-type meeting-type-badge"></span>
+            <span class="badge badge-folder meeting-folder-badge hidden"></span>
+            <span class="badge-date meeting-date"></span>
+            <span class="badge-date meeting-duration hidden"></span>
+        </div>
+        <div class="meeting-card-preview"></div>
+    </button>
+</template>
