@@ -338,22 +338,29 @@ window.RecorderModule = (() => {
         const input = getEl('meeting-title-input');
         if (!btn || !input || !currentMeetingId) return;
 
-        const origText = btn.textContent;
+        const origHTML = btn.innerHTML;
         btn.disabled = true;
-        btn.textContent = 'Generating...';
+        btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;"></span> Generating...';
 
         try {
-            const data = await api('/api/recordings/generate-title', {
+            const response = await fetch('/api/recordings/generate-title', {
                 method: 'POST',
-                body: { meeting_id: currentMeetingId },
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ meeting_id: currentMeetingId }),
             });
-            input.value = data.title || '';
+            const data = await response.json();
+            if (response.ok && data.title) {
+                input.value = data.title;
+                input.focus();
+            } else {
+                showToast(data.error || 'Failed to generate title', 'error');
+            }
         } catch (err) {
             showToast(`Failed to generate title: ${err.message}`, 'error');
         }
 
         btn.disabled = false;
-        btn.textContent = origText;
+        btn.innerHTML = origHTML;
     }
 
     function bindEvents() {
