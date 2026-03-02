@@ -14,6 +14,7 @@ def create_app():
     """Create and configure the Flask application."""
     from flask import Flask
     from flask_cors import CORS
+    from flask_login import LoginManager
 
     from config import Config
 
@@ -26,25 +27,36 @@ def create_app():
 
     CORS(app)
 
+    # ---- Flask-Login setup ----
+    login_manager = LoginManager()
+    login_manager.init_app(app)
+    login_manager.login_view = "auth.login_page"
+    login_manager.login_message = None  # suppress default flash
+
+    @login_manager.user_loader
+    def load_user(user_id):
+        from services.auth_service import get_user_by_id
+        user = get_user_by_id(user_id)
+        if user and not user.is_active:
+            return None  # disabled accounts cannot load
+        return user
+
+    # ---- Register blueprints ----
+    from routes.auth import auth_bp
     from routes.main import main_bp
     from routes.recordings import recordings_bp
     from routes.folders import folders_bp
     from routes.meeting_types import meeting_types_bp
     from routes.api import api_bp
+    from routes.admin import admin_bp
 
+    app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
     app.register_blueprint(recordings_bp)
     app.register_blueprint(folders_bp)
     app.register_blueprint(meeting_types_bp)
     app.register_blueprint(api_bp)
-
-    # Seed default meeting types on startup (gracefully handles missing DB)
-    with app.app_context():
-        try:
-            from services.seed_defaults import seed_default_meeting_types
-            seed_default_meeting_types()
-        except Exception as exc:
-            logging.warning("Seed defaults skipped: %s", exc)
+    app.register_blueprint(admin_bp)
 
     return app
 

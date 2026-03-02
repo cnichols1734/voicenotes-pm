@@ -1,9 +1,11 @@
 flask
 flask-cors
+flask-login
 gunicorn
 supabase
 openai
 requests
 python-dotenv
 pydub
+bcrypt
 pytest

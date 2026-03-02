@@ -5,6 +5,7 @@ import logging
 import os
 
 from flask import Blueprint, jsonify, request
+from flask_login import login_required
 
 from config import Config
 
@@ -19,13 +20,14 @@ api_bp = Blueprint("api", __name__, url_prefix="/api")
 @api_bp.route("/health", methods=["GET"])
 def health():
     """Health check endpoint. Returns 200 if the app is running."""
-    return jsonify({"status": "ok", "version": "1.0.0"})
+    return jsonify({"status": "ok", "version": "1.1.0"})
 
 
 # ---------------------------------------------------------------------------
 # GET /api/settings
 # ---------------------------------------------------------------------------
 @api_bp.route("/settings", methods=["GET"])
+@login_required
 def get_settings():
     """Return current non-sensitive app configuration."""
     return jsonify({
@@ -41,6 +43,7 @@ def get_settings():
 # POST /api/settings/model
 # ---------------------------------------------------------------------------
 @api_bp.route("/settings/model", methods=["POST"])
+@login_required
 def update_model():
     """Update the OpenRouter model used for summarization (runtime only)."""
     data = request.get_json(force=True) or {}

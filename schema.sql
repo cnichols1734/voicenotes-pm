@@ -5,11 +5,29 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================
+-- USERS
+-- Application users with email/password auth
+-- ============================================
+CREATE TABLE users (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    role TEXT DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_users_email ON users(email);
+
+-- ============================================
 -- FOLDERS
 -- User-created folders for organizing meetings
 -- ============================================
 CREATE TABLE folders (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     color TEXT DEFAULT '#6366f1',
     icon TEXT DEFAULT '📁',
@@ -18,12 +36,15 @@ CREATE TABLE folders (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE INDEX idx_folders_user_id ON folders(user_id);
+
 -- ============================================
 -- MEETING TYPES
 -- Configurable meeting types with editable AI prompts
 -- ============================================
 CREATE TABLE meeting_types (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     icon TEXT DEFAULT 'file-text',
     description TEXT,
@@ -34,12 +55,15 @@ CREATE TABLE meeting_types (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE INDEX idx_meeting_types_user_id ON meeting_types(user_id);
+
 -- ============================================
 -- MEETINGS
 -- Individual recorded meetings with transcripts and summaries
 -- ============================================
 CREATE TABLE meetings (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     folder_id UUID REFERENCES folders(id) ON DELETE SET NULL,
     meeting_type_id UUID REFERENCES meeting_types(id) ON DELETE SET NULL,
@@ -56,6 +80,7 @@ CREATE TABLE meetings (
 -- ============================================
 -- INDEXES
 -- ============================================
+CREATE INDEX idx_meetings_user_id ON meetings(user_id);
 CREATE INDEX idx_meetings_folder_id ON meetings(folder_id);
 CREATE INDEX idx_meetings_meeting_type_id ON meetings(meeting_type_id);
 CREATE INDEX idx_meetings_status ON meetings(status);
@@ -73,6 +98,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE TRIGGER users_updated_at
+    BEFORE UPDATE ON users
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
 CREATE TRIGGER folders_updated_at
     BEFORE UPDATE ON folders
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
@@ -86,6 +115,6 @@ CREATE TRIGGER meetings_updated_at
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- ============================================
--- NOTE: Meeting type seed data is inserted by the Flask
--- app on first boot via services/seed_defaults.py
+-- NOTE: Default meeting types are seeded per-user
+-- on first registration via services/seed_defaults.py
 -- ============================================

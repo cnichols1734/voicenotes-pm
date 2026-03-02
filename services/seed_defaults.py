@@ -1,6 +1,6 @@
 """
 VoiceNotes PM - Seed default meeting types.
-Called on app startup to populate the meeting_types table if empty.
+Called per-user on registration to populate their meeting_types.
 """
 import logging
 
@@ -299,24 +299,32 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
 ]
 
 
-def seed_default_meeting_types():
-    """Check if meeting_types table is empty and seed defaults if so."""
+def seed_meeting_types_for_user(user_id: str):
+    """Seed the default meeting types for a specific user."""
     try:
         from services.supabase_client import get_supabase
         supabase = get_supabase()
 
-        result = supabase.table("meeting_types").select("id", count="exact").execute()
+        # Check if user already has meeting types
+        result = supabase.table("meeting_types").select("id", count="exact").eq("user_id", user_id).execute()
         count = result.count if result.count is not None else len(result.data)
 
         if count == 0:
-            logger.info("Seeding default meeting types...")
-            supabase.table("meeting_types").insert(MEETING_TYPE_DEFAULTS).execute()
-            logger.info("Successfully seeded %d default meeting types.", len(MEETING_TYPE_DEFAULTS))
+            logger.info("Seeding default meeting types for user %s...", user_id)
+            rows = [{**mt, "user_id": user_id} for mt in MEETING_TYPE_DEFAULTS]
+            supabase.table("meeting_types").insert(rows).execute()
+            logger.info("Successfully seeded %d default meeting types for user %s.", len(rows), user_id)
         else:
-            logger.info("Meeting types already exist (%d found). Skipping seed.", count)
+            logger.info("User %s already has %d meeting types. Skipping seed.", user_id, count)
 
     except Exception as exc:
         logger.warning(
-            "Could not seed default meeting types (Supabase may not be configured yet): %s",
-            exc,
+            "Could not seed default meeting types for user %s: %s",
+            user_id, exc,
         )
+
+
+# Keep backward compat — called from old app startup path (now unused)
+def seed_default_meeting_types():
+    """Legacy: no-op since meeting types are now seeded per-user."""
+    logger.info("Meeting types are now seeded per-user on registration. Skipping global seed.")

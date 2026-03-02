@@ -1,11 +1,11 @@
 """
 VoiceNotes PM - Recordings CRUD + upload/transcribe/summarize routes.
 """
-import io
 import logging
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
+from flask_login import login_required, current_user
 
 from services.supabase_client import get_supabase
 from services.whisper_service import transcribe_audio
@@ -26,13 +26,15 @@ def _supabase_error(message, status=503):
 # GET /api/recordings
 # ---------------------------------------------------------------------------
 @recordings_bp.route("/", methods=["GET"])
+@login_required
 def list_recordings():
-    """List all meetings, with optional ?folder_id= and ?meeting_type_id= filters."""
+    """List all meetings for the current user, with optional filters."""
     try:
         supabase = get_supabase()
         query = (
             supabase.table("meetings")
             .select("*")
+            .eq("user_id", str(current_user.id))
             .order("recorded_at", desc=True)
         )
 
@@ -55,11 +57,19 @@ def list_recordings():
 # GET /api/recordings/<id>
 # ---------------------------------------------------------------------------
 @recordings_bp.route("/<meeting_id>", methods=["GET"])
+@login_required
 def get_recording(meeting_id):
-    """Get a single meeting with full details."""
+    """Get a single meeting with full details (must belong to current user)."""
     try:
         supabase = get_supabase()
-        result = supabase.table("meetings").select("*").eq("id", meeting_id).single().execute()
+        result = (
+            supabase.table("meetings")
+            .select("*")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .single()
+            .execute()
+        )
         if not result.data:
             return jsonify({"error": "Meeting not found"}), 404
         return jsonify({"meeting": result.data})
@@ -72,6 +82,7 @@ def get_recording(meeting_id):
 # POST /api/recordings/upload
 # ---------------------------------------------------------------------------
 @recordings_bp.route("/upload", methods=["POST"])
+@login_required
 def upload_recording():
     """
     Accept an audio blob, transcribe it via Whisper, create a meeting record
@@ -112,6 +123,7 @@ def upload_recording():
             "title": title_text,
             "transcript": transcript,
             "status": "selecting_type",
+            "user_id": str(current_user.id),
         }
         result = supabase.table("meetings").insert(insert_data).execute()
         meeting = result.data[0]
@@ -130,6 +142,7 @@ def upload_recording():
 # POST /api/recordings/summarize
 # ---------------------------------------------------------------------------
 @recordings_bp.route("/summarize", methods=["POST"])
+@login_required
 def summarize_recording():
     """
     Accept meeting_id, meeting_type_id, optional title and folder_id.
@@ -147,18 +160,26 @@ def summarize_recording():
     try:
         supabase = get_supabase()
 
-        # Fetch meeting transcript
-        mtg_result = supabase.table("meetings").select("*").eq("id", meeting_id).single().execute()
+        # Fetch meeting transcript (must belong to current user)
+        mtg_result = (
+            supabase.table("meetings")
+            .select("*")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .single()
+            .execute()
+        )
         if not mtg_result.data:
             return jsonify({"error": "Meeting not found"}), 404
         meeting = mtg_result.data
         transcript = meeting.get("transcript", "")
 
-        # Fetch meeting type prompt
+        # Fetch meeting type prompt (must belong to current user)
         mt_result = (
             supabase.table("meeting_types")
             .select("*")
             .eq("id", meeting_type_id)
+            .eq("user_id", str(current_user.id))
             .single()
             .execute()
         )
@@ -220,6 +241,7 @@ def summarize_recording():
 # PUT /api/recordings/<id>
 # ---------------------------------------------------------------------------
 @recordings_bp.route("/<meeting_id>", methods=["PUT"])
+@login_required
 def update_recording(meeting_id):
     """Update a meeting (title, folder_id, meeting_type_id)."""
     data = request.get_json(force=True) or {}
@@ -235,6 +257,7 @@ def update_recording(meeting_id):
             supabase.table("meetings")
             .update(update_data)
             .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
             .execute()
         )
         if not result.data:
@@ -249,11 +272,12 @@ def update_recording(meeting_id):
 # DELETE /api/recordings/<id>
 # ---------------------------------------------------------------------------
 @recordings_bp.route("/<meeting_id>", methods=["DELETE"])
+@login_required
 def delete_recording(meeting_id):
-    """Delete a meeting record."""
+    """Delete a meeting record (must belong to current user)."""
     try:
         supabase = get_supabase()
-        supabase.table("meetings").delete().eq("id", meeting_id).execute()
+        supabase.table("meetings").delete().eq("id", meeting_id).eq("user_id", str(current_user.id)).execute()
         return jsonify({"message": "Meeting deleted"}), 200
     except Exception as exc:
         logger.error("Failed to delete meeting %s: %s", meeting_id, exc)

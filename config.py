@@ -15,3 +15,4 @@ class Config:
     OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "minimax/minimax-m2.5")
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
     FLASK_ENV = os.environ.get("FLASK_ENV", "development")
+    ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "chrisnichols17@gmail.com").lower().strip()

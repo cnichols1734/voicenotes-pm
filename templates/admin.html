@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Admin - VoiceNotes PM{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <div class="admin-header">
+        <h1 class="text-page-title">User Management</h1>
+        <p class="text-secondary" style="margin-top:4px;">Manage accounts and view usage across your VoiceNotes PM
+            instance.</p>
+    </div>
+
+    <div class="admin-stats" id="admin-stats">
+        <div class="admin-stat-card">
+            <div class="admin-stat-value" id="stat-total-users">–</div>
+            <div class="admin-stat-label">Total Users</div>
+        </div>
+        <div class="admin-stat-card">
+            <div class="admin-stat-value" id="stat-active-users">–</div>
+            <div class="admin-stat-label">Active Users</div>
+        </div>
+        <div class="admin-stat-card">
+            <div class="admin-stat-value" id="stat-total-meetings">–</div>
+            <div class="admin-stat-label">Total Meetings</div>
+        </div>
+    </div>
+
+    <div class="admin-table-wrapper">
+        <table class="admin-table" id="users-table">
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Role</th>
+                    <th>Meetings</th>
+                    <th>Joined</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="users-tbody">
+                <tr>
+                    <td colspan="6" style="text-align:center;padding:40px;">
+                        <div class="spinner" style="margin:0 auto;"></div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    window.PAGE = 'admin';
+</script>
+<script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+{% endblock %}

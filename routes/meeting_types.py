@@ -4,6 +4,7 @@ VoiceNotes PM - Meeting types CRUD + reset routes.
 import logging
 
 from flask import Blueprint, jsonify, request
+from flask_login import login_required, current_user
 
 from services.supabase_client import get_supabase
 
@@ -29,11 +30,18 @@ def _get_default_prompt(name: str) -> str:
 # GET /api/meeting-types
 # ---------------------------------------------------------------------------
 @meeting_types_bp.route("/", methods=["GET"])
+@login_required
 def list_meeting_types():
-    """List all meeting types ordered by sort_order."""
+    """List all meeting types for the current user, ordered by sort_order."""
     try:
         supabase = get_supabase()
-        result = supabase.table("meeting_types").select("*").order("sort_order").execute()
+        result = (
+            supabase.table("meeting_types")
+            .select("*")
+            .eq("user_id", str(current_user.id))
+            .order("sort_order")
+            .execute()
+        )
         return jsonify({"meeting_types": result.data})
     except Exception as exc:
         logger.error("Failed to list meeting types: %s", exc)
@@ -44,6 +52,7 @@ def list_meeting_types():
 # GET /api/meeting-types/<id>
 # ---------------------------------------------------------------------------
 @meeting_types_bp.route("/<meeting_type_id>", methods=["GET"])
+@login_required
 def get_meeting_type(meeting_type_id):
     """Get a single meeting type with its full prompt template."""
     try:
@@ -52,6 +61,7 @@ def get_meeting_type(meeting_type_id):
             supabase.table("meeting_types")
             .select("*")
             .eq("id", meeting_type_id)
+            .eq("user_id", str(current_user.id))
             .single()
             .execute()
         )
@@ -67,8 +77,9 @@ def get_meeting_type(meeting_type_id):
 # POST /api/meeting-types
 # ---------------------------------------------------------------------------
 @meeting_types_bp.route("/", methods=["POST"])
+@login_required
 def create_meeting_type():
-    """Create a new meeting type."""
+    """Create a new meeting type for the current user."""
     data = request.get_json(force=True) or {}
     name = data.get("name", "").strip()
     prompt_template = data.get("prompt_template", "").strip()
@@ -85,6 +96,7 @@ def create_meeting_type():
         "prompt_template": prompt_template,
         "is_default": False,
         "sort_order": data.get("sort_order", 99),
+        "user_id": str(current_user.id),
     }
 
     try:
@@ -100,6 +112,7 @@ def create_meeting_type():
 # PUT /api/meeting-types/<id>
 # ---------------------------------------------------------------------------
 @meeting_types_bp.route("/<meeting_type_id>", methods=["PUT"])
+@login_required
 def update_meeting_type(meeting_type_id):
     """Update a meeting type (name, icon, description, prompt_template)."""
     data = request.get_json(force=True) or {}
@@ -115,6 +128,7 @@ def update_meeting_type(meeting_type_id):
             supabase.table("meeting_types")
             .update(update_data)
             .eq("id", meeting_type_id)
+            .eq("user_id", str(current_user.id))
             .execute()
         )
         if not result.data:
@@ -129,6 +143,7 @@ def update_meeting_type(meeting_type_id):
 # DELETE /api/meeting-types/<id>
 # ---------------------------------------------------------------------------
 @meeting_types_bp.route("/<meeting_type_id>", methods=["DELETE"])
+@login_required
 def delete_meeting_type(meeting_type_id):
     """Delete a meeting type. Only non-default types can be deleted."""
     try:
@@ -137,6 +152,7 @@ def delete_meeting_type(meeting_type_id):
             supabase.table("meeting_types")
             .select("is_default")
             .eq("id", meeting_type_id)
+            .eq("user_id", str(current_user.id))
             .single()
             .execute()
         )
@@ -145,7 +161,7 @@ def delete_meeting_type(meeting_type_id):
         if result.data.get("is_default"):
             return jsonify({"error": "Cannot delete a default meeting type"}), 403
 
-        supabase.table("meeting_types").delete().eq("id", meeting_type_id).execute()
+        supabase.table("meeting_types").delete().eq("id", meeting_type_id).eq("user_id", str(current_user.id)).execute()
         return jsonify({"message": "Meeting type deleted"}), 200
     except Exception as exc:
         logger.error("Failed to delete meeting type %s: %s", meeting_type_id, exc)
@@ -156,6 +172,7 @@ def delete_meeting_type(meeting_type_id):
 # POST /api/meeting-types/<id>/reset
 # ---------------------------------------------------------------------------
 @meeting_types_bp.route("/<meeting_type_id>/reset", methods=["POST"])
+@login_required
 def reset_meeting_type(meeting_type_id):
     """Reset a default meeting type's prompt back to the original seed value."""
     try:
@@ -164,6 +181,7 @@ def reset_meeting_type(meeting_type_id):
             supabase.table("meeting_types")
             .select("*")
             .eq("id", meeting_type_id)
+            .eq("user_id", str(current_user.id))
             .single()
             .execute()
         )

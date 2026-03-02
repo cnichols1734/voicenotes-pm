@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Create a VoiceNotes PM account" />
+    <title>Register - VoiceNotes PM</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+</head>
+
+<body>
+    <div class="auth-container">
+        <div class="auth-card">
+            <div class="auth-header">
+                <div class="auth-logo">
+                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                        <line x1="12" y1="19" x2="12" y2="22" />
+                        <line x1="8" y1="22" x2="16" y2="22" />
+                    </svg>
+                </div>
+                <h1 class="auth-title">Create your account</h1>
+                <p class="auth-subtitle">Get started with VoiceNotes PM</p>
+            </div>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+            {% for category, message in messages %}
+            <div class="auth-flash auth-flash-{{ category }}">{{ message }}</div>
+            {% endfor %}
+            {% endif %}
+            {% endwith %}
+
+            <form method="POST" action="{{ url_for('auth.register_submit') }}" class="auth-form">
+                <div class="form-group">
+                    <label class="form-label" for="display_name">Display Name</label>
+                    <input type="text" class="form-input" id="display_name" name="display_name" placeholder="Your name"
+                        required autocomplete="name" autofocus />
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="email">Email</label>
+                    <input type="email" class="form-input" id="email" name="email" placeholder="you@example.com"
+                        required autocomplete="email" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="password">Password</label>
+                    <input type="password" class="form-input" id="password" name="password"
+                        placeholder="At least 6 characters" required minlength="6" autocomplete="new-password" />
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="confirm_password">Confirm Password</label>
+                    <input type="password" class="form-input" id="confirm_password" name="confirm_password"
+                        placeholder="••••••••" required minlength="6" autocomplete="new-password" />
+                </div>
+                <button type="submit" class="btn btn-primary btn-lg auth-submit">Create Account</button>
+            </form>
+
+            <div class="auth-footer">
+                Already have an account? <a href="{{ url_for('auth.login_page') }}" class="auth-link">Sign in</a>
+            </div>
+        </div>
+    </div>
+</body>
+
+</html>
