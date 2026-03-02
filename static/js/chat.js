@@ -55,7 +55,7 @@ window.ChatModule = (() => {
                 }
             });
 
-            sendBtn.addEventListener('click', sendMessage);
+            sendBtn.addEventListener('click', () => sendMessage());
         }
 
         if (clearBtn) {
