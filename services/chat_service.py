@@ -34,7 +34,7 @@ RULES:
 4. When referencing specific points, quote or closely paraphrase the relevant part of the transcript.
 5. Be concise and direct. Use bullet points for lists.
 6. You may help organize, clarify, or reframe information from the meeting, but do not add new information.
-7. If asked to do something unrelated to the meeting (e.g., write code, tell a joke), politely redirect: "I'm here to help with questions about this meeting.""""
+7. If asked to do something unrelated to the meeting (e.g., write code, tell a joke), politely redirect by saying you are here to help with questions about this meeting."""
 
 
 def _build_system_prompt(meeting: dict) -> str:
