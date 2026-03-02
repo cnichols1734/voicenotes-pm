@@ -32,7 +32,7 @@
     <div class="meetings-list" id="meetings-list">
         <!-- Meeting cards rendered by JS -->
         <div class="empty-state" id="meetings-empty" style="display:none;">
-            <div class="empty-state-icon">🎙️</div>
+            <div class="empty-state-icon"><i data-lucide="mic" style="width:48px;height:48px;"></i></div>
             <div class="empty-state-title">No meetings yet</div>
             <div class="empty-state-desc">Hit the record button to capture your first meeting.</div>
         </div>
@@ -130,7 +130,9 @@
 
     <!-- State 6: Complete -->
     <div class="overlay-state" id="state-complete">
-        <div style="font-size:64px;">🎉</div>
+        <div style="color:var(--accent-success);margin-bottom:16px;">
+            <i data-lucide="check-circle" style="width:64px;height:64px;"></i>
+        </div>
         <h2 style="font-size:24px;font-weight:700;">Summary Ready!</h2>
         <p class="text-secondary" style="margin-bottom:20px;">Your meeting has been transcribed and summarized.</p>
         <button class="btn btn-primary btn-lg" id="view-meeting-btn">View Meeting Summary</button>

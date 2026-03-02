@@ -96,8 +96,8 @@
             <!-- Key Discussion Points -->
             <div class="summary-section" id="section-discussion">
                 <div class="summary-section-header">
-                    <span class="summary-section-icon">💬</span>
-                    <h2 class="summary-section-title">Key Discussion Points</h2>
+                    <span class="summary-section-icon"><i data-lucide="message-square"></i></span>
+                    <h3 class="summary-section-title">Key Discussion Points</h3>
                 </div>
                 <ul class="summary-bullet-list" id="discussion-list"></ul>
             </div>
@@ -121,6 +121,11 @@
 
     <!-- Transcript Tab -->
     <div class="tab-panel" id="tab-transcript">
+        <div class="empty-state" id="transcript-empty" style="display:none;">
+            <div class="empty-state-icon"><i data-lucide="file-text" style="width:48px;height:48px;"></i></div>
+            <div class="empty-state-title">No transcript available</div>
+            <div class="empty-state-desc">Summary was not generated or the meeting is still processing.</div>
+        </div>
         <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
             <button class="btn btn-secondary btn-sm" id="copy-transcript-btn">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"

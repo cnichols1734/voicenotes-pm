@@ -76,6 +76,8 @@ window.MeetingsModule = (() => {
             const card = buildMeetingCard(meeting, types);
             list.appendChild(card);
         });
+
+        if (window.lucide) lucide.createIcons();
     }
 
     function buildMeetingCard(meeting, types) {
@@ -92,7 +94,7 @@ window.MeetingsModule = (() => {
             window.location.href = `/meeting/${meeting.id}`;
         });
 
-        const typeBadge = type ? `<span class="badge badge-type">${type.icon || '📋'} ${type.name}</span>` : '';
+        const typeBadge = type ? `<span class="badge badge-type"><i data-lucide="${type.icon || 'file-text'}"></i> ${type.name}</span>` : '';
         const folderBadge = meeting.folder_id ? '' : ''; // Folder name requires join; skip for now
 
         card.innerHTML = `
@@ -176,12 +178,13 @@ window.MeetingsModule = (() => {
             const type = types.find(t => t.id === meeting.meeting_type_id);
             const folder = folders.find(f => f.id === meeting.folder_id);
 
-            const typeBadge = type ? `<span class="badge badge-type">${type.icon} ${type.name}</span>` : '';
-            const folderBadge = folder ? `<span class="badge badge-folder">${folder.icon} ${folder.name}</span>` : '';
+            const typeBadge = type ? `<span class="badge badge-type"><i data-lucide="${type.icon || 'file-text'}"></i> ${type.name}</span>` : '';
+            const folderBadge = folder ? `<span class="badge badge-folder"><i data-lucide="folder"></i> ${folder.name}</span>` : '';
             const dateBadge = `<span class="badge-date">${formatDate(meeting.recorded_at)}</span>`;
             const durBadge = meeting.duration_seconds ? `<span class="badge-date">${formatDuration(meeting.duration_seconds)}</span>` : '';
 
             metaEl.innerHTML = `${typeBadge}${folderBadge}${dateBadge}${durBadge}`;
+            if (window.lucide) lucide.createIcons();
         }
     }
 
@@ -219,8 +222,8 @@ window.MeetingsModule = (() => {
             <div class="action-item-body">
               <div class="action-task">${escapeHtml(item.task)}</div>
               <div class="action-pills">
-                ${item.owner ? `<span class="action-pill owner">👤 ${escapeHtml(item.owner)}</span>` : ''}
-                ${item.deadline ? `<span class="action-pill deadline">📅 ${escapeHtml(item.deadline)}</span>` : ''}
+                ${item.owner ? `<span class="action-pill owner"><i data-lucide="user"></i> ${escapeHtml(item.owner)}</span>` : ''}
+                ${item.deadline ? `<span class="action-pill deadline"><i data-lucide="calendar"></i> ${escapeHtml(item.deadline)}</span>` : ''}
                 ${item.priority ? `<span class="priority-dot ${item.priority}" title="${item.priority} priority"></span>` : ''}
               </div>
             </div>
@@ -258,11 +261,23 @@ window.MeetingsModule = (() => {
             fuEl.innerHTML = (summary.follow_ups || [])
                 .map(p => `<li>${escapeHtml(p)}</li>`).join('') || '<li class="text-secondary">None recorded.</li>';
         }
+
+        if (window.lucide) lucide.createIcons();
     }
 
     function renderTranscript(transcript) {
-        const el = getEl('transcript-content');
-        if (el) el.textContent = transcript || '(No transcript available)';
+        const contentEl = getEl('transcript-content');
+        const emptyEl = getEl('transcript-empty');
+        if (transcript) {
+            if (contentEl) {
+                contentEl.textContent = transcript;
+                contentEl.style.display = 'block';
+            }
+            if (emptyEl) emptyEl.style.display = 'none';
+        } else {
+            if (contentEl) contentEl.style.display = 'none';
+            if (emptyEl) emptyEl.style.display = 'flex';
+        }
     }
 
     function populateDetailFolderSelect(folders, currentFolderId) {
@@ -272,8 +287,8 @@ window.MeetingsModule = (() => {
         folders.forEach(f => {
             const opt = document.createElement('option');
             opt.value = f.id;
-            opt.textContent = `${f.icon} ${f.name}`;
-            if (f.id === currentFolderId) opt.selected = true;
+            opt.textContent = f.name;
+            if (currentFolderId === f.id) opt.selected = true;
             select.appendChild(opt);
         });
     }
@@ -286,13 +301,15 @@ window.MeetingsModule = (() => {
             const card = document.createElement('div');
             card.className = 'meeting-type-card';
             card.innerHTML = `
-        <div class="meeting-type-card-icon">${type.icon || '📋'}</div>
+        <div class="meeting-type-card-icon"><i data-lucide="${type.icon || 'file-text'}"></i></div>
         <div class="meeting-type-card-name">${type.name}</div>
         <div class="meeting-type-card-desc">${type.description || ''}</div>
       `;
             card.addEventListener('click', () => resurfaceWith(type.id));
             grid.appendChild(card);
         });
+
+        if (window.lucide) lucide.createIcons();
     }
 
     async function resurfaceWith(typeId) {

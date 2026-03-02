@@ -80,7 +80,7 @@ def create_meeting_type():
 
     insert_data = {
         "name": name,
-        "icon": data.get("icon", "📋"),
+        "icon": data.get("icon", "file-text"),
         "description": data.get("description", ""),
         "prompt_template": prompt_template,
         "is_default": False,

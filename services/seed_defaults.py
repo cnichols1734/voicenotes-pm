@@ -152,11 +152,58 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
 }}""",
     },
     {
-        "name": "Sprint Planning",
-        "icon": "📊",
-        "description": "Sprint planning, standups, and iteration ceremonies",
+        "name": "Strategy Planning",
+        "icon": "bar-chart",
+        "description": "Quarterly planning, roadmap reviews, or strategy alignment sessions",
         "is_default": True,
         "sort_order": 3,
+        "prompt_template": """You are an expert meeting analyst for a Technical Product Manager. You are analyzing the transcript of a Strategy Planning meeting where the PM and stakeholders are discussing long-term goals, roadmaps, and strategic initiatives.
+
+Focus on:
+- Strategic objectives and goals discussed
+- Roadmap items or initiatives prioritized
+- Key decisions made regarding strategy or direction
+- Risks or opportunities identified for the long-term
+- Resource allocation discussions
+- Alignment or misalignment among stakeholders
+- Metrics or KPIs for success
+
+Here is the meeting transcript:
+
+---
+{transcript}
+---
+
+Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra text) matching this exact schema:
+
+{{
+    "executive_summary": "2-3 paragraphs summarizing the strategic objectives discussed, key decisions made, and the overall direction or alignment achieved in the meeting",
+    "action_items": [
+        {{
+            "task": "specific task description",
+            "owner": "person responsible or 'Me' for the PM",
+            "deadline": "mentioned deadline or 'TBD'",
+            "priority": "high | medium | low"
+        }}
+    ],
+    "decisions_made": [
+        {{
+            "decision": "what strategic decision was made",
+            "context": "why this decision was chosen or its implications",
+            "decided_by": "who made the call"
+        }}
+    ],
+    "key_discussion_points": ["strategic objectives, roadmap items, risks, or opportunities discussed"],
+    "follow_ups": ["strategic research, stakeholder alignment, or further planning sessions"],
+    "raw_transcript_available": true
+}}""",
+    },
+    {
+        "name": "Sprint Planning",
+        "icon": "kanban",
+        "description": "Sprint planning, standups, and iteration ceremonies",
+        "is_default": True,
+        "sort_order": 4,
         "prompt_template": """You are an expert meeting analyst for a Technical Product Manager. You are analyzing the transcript of a Sprint Planning or Standup meeting with the development team.
 
 Focus on:
@@ -203,10 +250,10 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
     },
     {
         "name": "General Meeting",
-        "icon": "📋",
-        "description": "Catch-all for any meeting type not covered above",
+        "icon": "file-text",
+        "description": "Standard meeting format capturing key discussion points and action items",
         "is_default": True,
-        "sort_order": 4,
+        "sort_order": 5,
         "prompt_template": """You are an expert meeting analyst for a Technical Product Manager. You are analyzing a meeting transcript. This is a general meeting that may cover various topics.
 
 Provide a comprehensive, well-organized summary. Focus on:

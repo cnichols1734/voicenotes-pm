@@ -25,7 +25,7 @@ CREATE TABLE folders (
 CREATE TABLE meeting_types (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
     name TEXT NOT NULL,
-    icon TEXT DEFAULT '📋',
+    icon TEXT DEFAULT 'file-text',
     description TEXT,
     prompt_template TEXT NOT NULL,
     is_default BOOLEAN DEFAULT FALSE,

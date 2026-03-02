@@ -4,8 +4,8 @@
  */
 
 window.PromptEditorModule = (() => {
-    const ICONS = ['📋', '🚀', '🔍', '👔', '📊', '🎯', '💡', '📝', '🤝', '⚡', '🔧', '🎓', '📈', '🗺️', '🔬', '💼', '🌐', '🎤', '📌', '🔑'];
-    let selectedIcon = '📋';
+    const ICONS = ['file-text', 'rocket', 'search', 'briefcase', 'bar-chart', 'target', 'lightbulb', 'pen-tool', 'users', 'zap', 'wrench', 'graduation-cap', 'trending-up', 'map', 'microscope', 'globe', 'mic', 'pin', 'key', 'message-square'];
+    let selectedIcon = 'file-text';
     let isEditing = false;
     let editingId = null;
 
@@ -42,7 +42,7 @@ window.PromptEditorModule = (() => {
             card.className = 'type-card';
             card.innerHTML = `
         <div class="type-card-header">
-          <div class="type-card-icon">${type.icon || '📋'}</div>
+          <div class="type-card-icon"><i data-lucide="${type.icon || 'file-text'}"></i></div>
           <div class="type-card-info">
             <div class="type-card-name">${escapeHtml(type.name)}</div>
             <div class="type-card-desc">${escapeHtml(type.description || '')}</div>
@@ -64,11 +64,13 @@ window.PromptEditorModule = (() => {
         const addCard = document.createElement('div');
         addCard.className = 'type-card type-card-add';
         addCard.innerHTML = `
-      <div class="type-card-add-icon">+</div>
+      <div class="type-card-add-icon"><i data-lucide="plus"></i></div>
       <div class="type-card-add-label">Add Meeting Type</div>
     `;
         addCard.addEventListener('click', () => openCreateModal());
         grid.appendChild(addCard);
+
+        if (window.lucide) lucide.createIcons();
     }
 
     // ---------------------------------------------------------------------------
@@ -85,7 +87,7 @@ window.PromptEditorModule = (() => {
         getEl('edit-type-prompt').value = type.prompt_template;
         updateCharCount();
 
-        selectedIcon = type.icon || '📋';
+        selectedIcon = type.icon || 'file-text';
         updateIconSelection();
 
         const saveBtn = getEl('save-type-btn');
@@ -111,7 +113,7 @@ window.PromptEditorModule = (() => {
         getEl('edit-type-prompt').value = '';
         updateCharCount();
 
-        selectedIcon = '📋';
+        selectedIcon = 'file-text';
         updateIconSelection();
 
         const saveBtn = getEl('save-type-btn');
@@ -197,8 +199,9 @@ window.PromptEditorModule = (() => {
         ICONS.forEach(icon => {
             const btn = document.createElement('div');
             btn.className = 'icon-option';
-            btn.textContent = icon;
+            btn.innerHTML = `<i data-lucide="${icon}"></i>`;
             btn.title = icon;
+            btn.dataset.icon = icon;
             btn.addEventListener('click', () => {
                 selectedIcon = icon;
                 getEl('edit-type-icon').value = icon;
@@ -210,7 +213,7 @@ window.PromptEditorModule = (() => {
 
     function updateIconSelection() {
         document.querySelectorAll('.icon-option').forEach(el => {
-            el.classList.toggle('selected', el.textContent === selectedIcon);
+            el.classList.toggle('selected', el.dataset.icon === selectedIcon);
         });
     }
 

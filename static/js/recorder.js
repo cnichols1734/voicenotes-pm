@@ -258,7 +258,7 @@ window.RecorderModule = (() => {
             const card = document.createElement('div');
             card.className = 'meeting-type-card';
             card.innerHTML = `
-        <div class="meeting-type-card-icon">${type.icon || '📋'}</div>
+        <div class="meeting-type-card-icon"><i data-lucide="${type.icon || 'file-text'}"></i></div>
         <div class="meeting-type-card-name">${type.name}</div>
         <div class="meeting-type-card-desc">${type.description || ''}</div>
       `;
@@ -270,6 +270,7 @@ window.RecorderModule = (() => {
             });
             grid.appendChild(card);
         });
+        if (window.lucide) lucide.createIcons();
     }
 
     async function populateFolderSelect() {

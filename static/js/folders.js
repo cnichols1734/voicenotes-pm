@@ -50,13 +50,14 @@ window.FoldersModule = (() => {
             btn.dataset.folderId = folder.id;
             if (window.AppState.currentFolderFilter === folder.id) btn.classList.add('active');
             btn.innerHTML = `
-        <span class="sidebar-item-icon" style="color:${folder.color};">${folder.icon}</span>
+        <span class="sidebar-item-icon" style="color:${folder.color};"><i data-lucide="${folder.icon || 'folder'}"></i></span>
         <span class="sidebar-item-name">${folder.name}</span>
       `;
             btn.addEventListener('click', () => selectFolder(folder.id));
             btn.addEventListener('contextmenu', e => { e.preventDefault(); openContextMenu(e, folder); });
             list.appendChild(btn);
         });
+        if (window.lucide) lucide.createIcons();
     }
 
     function updateFolderCount() {
@@ -78,12 +79,13 @@ window.FoldersModule = (() => {
                 btn.className = 'sidebar-item';
                 if (window.AppState.currentTypeFilter === type.id) btn.classList.add('active');
                 btn.innerHTML = `
-          <span class="sidebar-item-icon">${type.icon || '📋'}</span>
+          <span class="sidebar-item-icon"><i data-lucide="${type.icon || 'file-text'}"></i></span>
           <span class="sidebar-item-name">${type.name}</span>
         `;
                 btn.addEventListener('click', () => selectTypeFilter(type.id));
                 container.appendChild(btn);
             });
+            if (window.lucide) lucide.createIcons();
         } catch (e) { /* skip */ }
     }
 
@@ -129,7 +131,7 @@ window.FoldersModule = (() => {
         try {
             const data = await api('/api/folders', {
                 method: 'POST',
-                body: { name, color: selectedColor, icon: '📁' },
+                body: { name, color: selectedColor, icon: 'folder' },
             });
             folders.push(data.folder);
             renderFolders();
