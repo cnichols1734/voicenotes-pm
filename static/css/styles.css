@@ -2843,8 +2843,14 @@ select {
 }
 
 /* =====================================================
-   iOS zoom prevention — 16px minimum on all inputs
+   iOS zoom prevention
    ===================================================== */
+/* Prevent pinch-to-zoom (iOS ignores user-scalable=no) */
+html {
+  touch-action: manipulation;
+}
+
+/* 16px minimum on all inputs — iOS auto-zooms under 16px */
 @supports (-webkit-touch-callout: none) {
   input, textarea, select,
   .form-input, .form-textarea, .form-select,
