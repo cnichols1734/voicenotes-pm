@@ -34,14 +34,60 @@ class NamedBytesIO(io.BytesIO):
         self.name = name
 
 
+def _convert_to_wav(audio_bytes: bytes, file_format: str) -> bytes:
+    """
+    Convert audio to 16kHz mono WAV using ffmpeg.
+    whisper.cpp needs WAV format since it was built without FFmpeg support.
+    """
+    import subprocess
+    import tempfile
+    import os
+
+    with tempfile.NamedTemporaryFile(suffix=f".{file_format}", delete=False) as tmp_in:
+        tmp_in.write(audio_bytes)
+        tmp_in_path = tmp_in.name
+
+    tmp_out_path = tmp_in_path.rsplit(".", 1)[0] + ".wav"
+
+    try:
+        result = subprocess.run(
+            [
+                "ffmpeg", "-y", "-i", tmp_in_path,
+                "-ar", "16000",   # 16kHz sample rate (Whisper's native rate)
+                "-ac", "1",       # mono
+                "-c:a", "pcm_s16le",  # 16-bit PCM
+                tmp_out_path,
+            ],
+            capture_output=True,
+            timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg conversion failed: {result.stderr.decode()[:200]}")
+
+        with open(tmp_out_path, "rb") as f:
+            wav_bytes = f.read()
+
+        logger.info("Converted %s (%.1f KB) -> WAV (%.1f KB)",
+                     file_format, len(audio_bytes) / 1024, len(wav_bytes) / 1024)
+        return wav_bytes
+    finally:
+        os.unlink(tmp_in_path)
+        if os.path.exists(tmp_out_path):
+            os.unlink(tmp_out_path)
+
+
 def _transcribe_local(audio_bytes: bytes, file_format: str) -> str:
     """
     Transcribe audio using a local whisper.cpp server.
+    Converts to WAV first (whisper.cpp needs WAV format).
     Uses the /inference endpoint with multipart form upload.
     """
+    # Convert to WAV — whisper.cpp can't decode webm/opus natively
+    wav_bytes = _convert_to_wav(audio_bytes, file_format)
+
     url = Config.WHISPER_BASE_URL.rstrip("/") + "/inference"
     files = {
-        "file": (f"audio.{file_format}", audio_bytes, f"audio/{file_format}"),
+        "file": ("audio.wav", wav_bytes, "audio/wav"),
     }
     data = {
         "response_format": "json",
@@ -55,7 +101,9 @@ def _transcribe_local(audio_bytes: bytes, file_format: str) -> str:
     )
     response.raise_for_status()
     result = response.json()
-    return result.get("text", "").strip()
+    text = result.get("text", "").strip()
+    logger.info("Local Whisper returned: '%s'", text[:100] if text else "(empty)")
+    return text
 
 
 def _transcribe_openai(audio_bytes: bytes, file_format: str) -> str:
