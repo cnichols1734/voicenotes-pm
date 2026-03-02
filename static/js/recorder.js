@@ -1,19 +1,36 @@
 /**
  * VoiceNotes PM - Audio recorder module.
- * Handles MediaRecorder, waveform visualization, upload, and overlay state machine.
+ * Handles MediaRecorder, waveform visualization, streaming transcription,
+ * and overlay state machine.
+ *
+ * Streaming strategy:
+ *   - Every CHUNK_INTERVAL_MS (60s), the recorder is stopped and immediately
+ *     restarted. The completed segment is sent to /api/recordings/transcribe-chunk
+ *     for Whisper transcription.
+ *   - Transcript text accumulates in real time during recording.
+ *   - On final stop, the last segment is transcribed, then the meeting record
+ *     is created with the full accumulated transcript (no large upload needed).
  */
 
 window.RecorderModule = (() => {
-    // State
+    // ---- Config ----
+    const CHUNK_INTERVAL_MS = 60_000; // send a chunk every 60 seconds
+
+    // ---- State ----
+    let stream = null;
     let mediaRecorder = null;
-    let audioChunks = [];
-    let recordingBlob = null;
+    let audioChunks = [];          // chunks for current segment
     let timerInterval = null;
     let elapsedSeconds = 0;
     let audioContext = null;
     let analyserNode = null;
     let animFrameId = null;
-    let stream = null;
+
+    // Streaming transcription state
+    let transcriptSegments = [];   // array of transcript strings
+    let pendingTranscriptions = 0; // in-flight API calls
+    let chunkRotateInterval = null;
+    let isRecording = false;
 
     // Overlay state machine
     const STATES = ['recording', 'processing', 'type-select', 'details', 'summarizing', 'complete'];
@@ -39,7 +56,7 @@ window.RecorderModule = (() => {
 
     function closeOverlay() {
         if (!overlay) return;
-        if (mediaRecorder && mediaRecorder.state === 'recording') {
+        if (isRecording) {
             if (!confirm('Recording is in progress. Close anyway? The recording will be lost.')) return;
         }
         stopEverything();
@@ -59,12 +76,17 @@ window.RecorderModule = (() => {
     function resetOverlayState() {
         stopEverything();
         audioChunks = [];
-        recordingBlob = null;
+        transcriptSegments = [];
+        pendingTranscriptions = 0;
         elapsedSeconds = 0;
         currentMeetingId = null;
         currentTranscript = null;
         selectedMeetingTypeId = null;
+        isRecording = false;
         if (getEl('recording-timer')) getEl('recording-timer').textContent = '00:00';
+        if (getEl('live-transcript')) getEl('live-transcript').style.display = 'none';
+        if (getEl('live-transcript-text')) getEl('live-transcript-text').textContent = '';
+        if (getEl('transcription-status')) getEl('transcription-status').textContent = '';
         STATES.forEach(s => {
             const el = getEl(`state-${s}`);
             if (el) el.classList.remove('active');
@@ -73,7 +95,7 @@ window.RecorderModule = (() => {
     }
 
     // ---------------------------------------------------------------------------
-    // Recording
+    // Recording with streaming transcription
     // ---------------------------------------------------------------------------
     async function startRecording() {
         if (!getEl('waveform-canvas')) return;
@@ -97,14 +119,9 @@ window.RecorderModule = (() => {
         source.connect(analyserNode);
         drawWaveform();
 
-        // MediaRecorder
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-            ? 'audio/webm;codecs=opus'
-            : 'audio/webm';
-        mediaRecorder = new MediaRecorder(stream, { mimeType });
-        mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
-        mediaRecorder.onstop = handleRecordingStop;
-        mediaRecorder.start(500); // collect data every 500ms for progress
+        // Start first recorder segment
+        isRecording = true;
+        startRecorderSegment();
 
         // Timer
         elapsedSeconds = 0;
@@ -117,33 +134,216 @@ window.RecorderModule = (() => {
 
         showState('recording');
 
+        // Periodic chunk rotation for streaming transcription
+        chunkRotateInterval = setInterval(() => {
+            if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
+                rotateRecorderSegment();
+            }
+        }, CHUNK_INTERVAL_MS);
+
         // Warn on page leave during recording
         window.addEventListener('beforeunload', beforeUnloadHandler);
     }
 
+    function getMimeType() {
+        return MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus'
+            : 'audio/webm';
+    }
+
+    function startRecorderSegment() {
+        audioChunks = [];
+        const mimeType = getMimeType();
+        mediaRecorder = new MediaRecorder(stream, { mimeType });
+        mediaRecorder.ondataavailable = e => {
+            if (e.data.size > 0) audioChunks.push(e.data);
+        };
+        mediaRecorder.start(500); // collect data every 500ms for progress
+    }
+
+    function rotateRecorderSegment() {
+        // Stop current recorder — its onstop will send the chunk for transcription
+        // and automatically start a new segment
+        if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+
+        const chunksToSend = audioChunks;
+        audioChunks = [];
+
+        mediaRecorder.onstop = () => {
+            const mimeType = mediaRecorder ? mediaRecorder.mimeType : 'audio/webm';
+            const blob = new Blob(chunksToSend, { type: mimeType });
+            sendChunkForTranscription(blob);
+
+            // Start a new segment immediately (gap is milliseconds)
+            if (isRecording && stream) {
+                startRecorderSegment();
+            }
+        };
+        mediaRecorder.stop();
+    }
+
+    async function sendChunkForTranscription(blob) {
+        if (blob.size < 500) return; // skip if too tiny
+
+        pendingTranscriptions++;
+        updateTranscriptionStatus();
+
+        const formData = new FormData();
+        formData.append('audio', blob, 'chunk.webm');
+        formData.append('format', 'webm');
+
+        try {
+            const data = await api('/api/recordings/transcribe-chunk', {
+                method: 'POST',
+                body: formData,
+            });
+            if (data.text && data.text.trim()) {
+                transcriptSegments.push(data.text.trim());
+                updateLiveTranscript();
+            }
+        } catch (err) {
+            console.error('Chunk transcription failed:', err);
+            // Non-fatal — we'll continue recording and transcribing future chunks
+        }
+
+        pendingTranscriptions--;
+        updateTranscriptionStatus();
+    }
+
+    function updateLiveTranscript() {
+        const container = getEl('live-transcript');
+        const textEl = getEl('live-transcript-text');
+        if (!container || !textEl) return;
+
+        const fullText = transcriptSegments.join(' ');
+        if (fullText) {
+            container.style.display = 'block';
+            // Show last ~300 chars so it stays readable
+            textEl.textContent = fullText.length > 300
+                ? '...' + fullText.slice(-300)
+                : fullText;
+            // Auto-scroll to bottom
+            textEl.scrollTop = textEl.scrollHeight;
+        }
+    }
+
+    function updateTranscriptionStatus() {
+        const el = getEl('transcription-status');
+        if (!el) return;
+        if (pendingTranscriptions > 0) {
+            el.textContent = '• Transcribing...';
+            el.className = 'transcription-status active';
+        } else if (transcriptSegments.length > 0) {
+            el.textContent = `• ${transcriptSegments.length} segment${transcriptSegments.length > 1 ? 's' : ''} transcribed`;
+            el.className = 'transcription-status';
+        } else {
+            el.textContent = '';
+            el.className = 'transcription-status';
+        }
+    }
+
     function beforeUnloadHandler(e) {
-        if (mediaRecorder && mediaRecorder.state === 'recording') {
+        if (isRecording) {
             e.preventDefault();
             e.returnValue = '';
         }
     }
 
     function stopRecording() {
-        if (mediaRecorder && mediaRecorder.state === 'recording') {
-            mediaRecorder.stop();
-        }
+        if (!isRecording) return;
+        isRecording = false;
+
+        // Stop the periodic rotation
+        clearInterval(chunkRotateInterval);
+        chunkRotateInterval = null;
+
+        // Stop timer and visuals
         clearInterval(timerInterval);
         timerInterval = null;
         cancelAnimationFrame(animFrameId);
         animFrameId = null;
-        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
-        if (audioContext) { audioContext.close(); audioContext = null; }
+
         window.removeEventListener('beforeunload', beforeUnloadHandler);
+
         showState('processing');
+
+        // Stop the current recorder and transcribe the final segment
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            const finalChunks = audioChunks;
+            audioChunks = [];
+
+            mediaRecorder.onstop = async () => {
+                const mimeType = mediaRecorder ? mediaRecorder.mimeType : 'audio/webm';
+                const blob = new Blob(finalChunks, { type: mimeType });
+
+                // Transcribe the final chunk
+                if (blob.size >= 500) {
+                    await sendChunkForTranscription(blob);
+                }
+
+                // Wait for any in-flight transcriptions to complete
+                while (pendingTranscriptions > 0) {
+                    await new Promise(r => setTimeout(r, 200));
+                }
+
+                // Clean up audio stream
+                if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+                if (audioContext) { audioContext.close(); audioContext = null; }
+
+                // Create the meeting with the full accumulated transcript
+                await createMeetingWithTranscript();
+            };
+            mediaRecorder.stop();
+        } else {
+            // Recorder already stopped somehow
+            if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+            if (audioContext) { audioContext.close(); audioContext = null; }
+            createMeetingWithTranscript();
+        }
+    }
+
+    async function createMeetingWithTranscript() {
+        const fullTranscript = transcriptSegments.join('\n\n');
+
+        if (!fullTranscript.trim()) {
+            showToast('No speech was detected. Please try again.', 'error');
+            closeOverlay();
+            return;
+        }
+
+        try {
+            const formData = new FormData();
+            formData.append('transcript', fullTranscript);
+
+            const data = await api('/api/recordings/upload', {
+                method: 'POST',
+                body: formData,
+            });
+
+            currentMeetingId = data.meeting_id;
+            currentTranscript = data.transcript;
+            if (getEl('meeting-title-input')) getEl('meeting-title-input').value = '';
+
+            // Show the new meeting in the list right away (status: selecting_type)
+            if (window.MeetingsModule && window.MeetingsModule.reload) {
+                window.MeetingsModule.reload();
+            }
+
+            await loadMeetingTypes();
+            showTranscriptPreview(currentTranscript);
+            showState('type-select');
+        } catch (err) {
+            showToast(`Failed to save meeting: ${err.message}`, 'error');
+            closeOverlay();
+        }
     }
 
     function stopEverything() {
+        isRecording = false;
+        clearInterval(chunkRotateInterval);
+        chunkRotateInterval = null;
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            mediaRecorder.onstop = null; // prevent trigger
             mediaRecorder.stop();
         }
         clearInterval(timerInterval);
@@ -153,12 +353,6 @@ window.RecorderModule = (() => {
         if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
         if (audioContext) { audioContext.close(); audioContext = null; }
         window.removeEventListener('beforeunload', beforeUnloadHandler);
-    }
-
-    async function handleRecordingStop() {
-        const mimeType = mediaRecorder ? mediaRecorder.mimeType : 'audio/webm';
-        recordingBlob = new Blob(audioChunks, { type: mimeType });
-        await uploadAndTranscribe(recordingBlob);
     }
 
     // ---------------------------------------------------------------------------
@@ -201,38 +395,8 @@ window.RecorderModule = (() => {
     }
 
     // ---------------------------------------------------------------------------
-    // Upload and transcribe
+    // Meeting type selection & folder helpers
     // ---------------------------------------------------------------------------
-    async function uploadAndTranscribe(blob) {
-        showState('processing');
-        const formData = new FormData();
-        formData.append('audio', blob, 'recording.webm');
-        formData.append('format', 'webm');
-
-        try {
-            const data = await api('/api/recordings/upload', {
-                method: 'POST',
-                body: formData,
-            });
-            currentMeetingId = data.meeting_id;
-            currentTranscript = data.transcript;
-            if (getEl('meeting-title-input')) getEl('meeting-title-input').value = '';
-
-            // Show the new meeting in the list right away (status: selecting_type)
-            if (window.MeetingsModule && window.MeetingsModule.reload) {
-                window.MeetingsModule.reload();
-            }
-
-            await loadMeetingTypes();
-            showTranscriptPreview(currentTranscript);
-            showState('type-select');
-        } catch (err) {
-            showToast(`Transcription failed: ${err.message}. The recording could not be processed.`, 'error');
-            // Allow retry: go back to idle
-            closeOverlay();
-        }
-    }
-
     async function loadMeetingTypes() {
         try {
             const data = await api('/api/meeting-types');

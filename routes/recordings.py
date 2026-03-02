@@ -80,14 +80,14 @@ def get_recording(meeting_id):
 
 
 # ---------------------------------------------------------------------------
-# POST /api/recordings/upload
+# POST /api/recordings/transcribe-chunk
 # ---------------------------------------------------------------------------
-@recordings_bp.route("/upload", methods=["POST"])
+@recordings_bp.route("/transcribe-chunk", methods=["POST"])
 @login_required
-def upload_recording():
+def transcribe_chunk():
     """
-    Accept an audio blob, transcribe it via Whisper, create a meeting record
-    with status='selecting_type', and return the transcript + meeting_id.
+    Accept a small audio blob, transcribe it via Whisper, and return the text.
+    Used for streaming transcription during recording — no DB write.
     """
     if "audio" not in request.files:
         return jsonify({"error": "No audio file provided"}), 400
@@ -95,20 +95,59 @@ def upload_recording():
     audio_file = request.files["audio"]
     audio_bytes = audio_file.read()
 
-    if len(audio_bytes) < 1000:
-        return jsonify({"error": "Recording too short. Please record at least a few seconds."}), 400
-
-    if len(audio_bytes) > MAX_AUDIO_BYTES:
-        return jsonify({"error": "Audio file exceeds 100 MB limit."}), 413
+    if len(audio_bytes) < 500:
+        # Very short chunk, likely silence — return empty
+        return jsonify({"text": ""})
 
     file_format = request.form.get("format", "webm")
 
-    # Transcribe
     try:
         transcript = transcribe_audio(audio_bytes, file_format=file_format)
     except Exception as exc:
-        logger.error("Whisper transcription failed: %s", exc)
+        logger.error("Chunk transcription failed: %s", exc)
         return jsonify({"error": "Transcription failed", "detail": str(exc)}), 502
+
+    return jsonify({"text": transcript})
+
+
+# ---------------------------------------------------------------------------
+# POST /api/recordings/upload
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/upload", methods=["POST"])
+@login_required
+def upload_recording():
+    """
+    Create a meeting record from either:
+      1. Pre-built transcript (from streaming chunks) — just saves to DB
+      2. Audio blob (legacy/fallback) — transcribes then saves
+    """
+    # Check for pre-built transcript (streaming mode)
+    transcript = request.form.get("transcript", "").strip()
+
+    if not transcript:
+        # Legacy mode: audio blob upload
+        if "audio" not in request.files:
+            return jsonify({"error": "No audio file or transcript provided"}), 400
+
+        audio_file = request.files["audio"]
+        audio_bytes = audio_file.read()
+
+        if len(audio_bytes) < 1000:
+            return jsonify({"error": "Recording too short. Please record at least a few seconds."}), 400
+
+        if len(audio_bytes) > MAX_AUDIO_BYTES:
+            return jsonify({"error": "Audio file exceeds 100 MB limit."}), 413
+
+        file_format = request.form.get("format", "webm")
+
+        try:
+            transcript = transcribe_audio(audio_bytes, file_format=file_format)
+        except Exception as exc:
+            logger.error("Whisper transcription failed: %s", exc)
+            return jsonify({"error": "Transcription failed", "detail": str(exc)}), 502
+
+    if not transcript:
+        return jsonify({"error": "No transcript could be generated."}), 400
 
     # Use a generic placeholder title (user can name it or use AI generate)
     title_text = f"Meeting - {datetime.now().strftime('%Y-%m-%d %H:%M')}"

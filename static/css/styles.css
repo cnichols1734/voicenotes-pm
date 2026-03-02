@@ -975,6 +975,47 @@ select {
   max-width: 90vw;
 }
 
+/* Live transcript during recording */
+.live-transcript {
+  width: 100%;
+  max-width: 500px;
+  margin-top: 4px;
+}
+
+.live-transcript-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+}
+
+.live-transcript-text {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  max-height: 120px;
+  overflow-y: auto;
+  text-align: left;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.transcription-status {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  margin-left: 4px;
+}
+
+.transcription-status.active {
+  color: var(--accent-primary);
+}
+
 /* Meeting type selection grid */
 .meeting-type-grid {
   display: grid;
@@ -2702,8 +2743,18 @@ select {
 }
 
 @keyframes chatTypingDot {
-  0%, 60%, 100% { opacity: 0.3; transform: scale(0.8); }
-  30% { opacity: 1; transform: scale(1); }
+
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+
+  30% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 @keyframes chatBubbleIn {
@@ -2711,6 +2762,7 @@ select {
     opacity: 0;
     transform: translateY(8px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -2852,9 +2904,15 @@ html {
 
 /* 16px minimum on all inputs — iOS auto-zooms under 16px */
 @supports (-webkit-touch-callout: none) {
-  input, textarea, select,
-  .form-input, .form-textarea, .form-select,
-  .search-input, .chat-input {
+
+  input,
+  textarea,
+  select,
+  .form-input,
+  .form-textarea,
+  .form-select,
+  .search-input,
+  .chat-input {
     font-size: 16px !important;
   }
 }
