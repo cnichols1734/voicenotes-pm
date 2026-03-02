@@ -2481,6 +2481,27 @@ select {
 }
 
 /* =====================================================
+   AI Title Generation Button
+   ===================================================== */
+.title-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.title-input-row .form-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-title-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+  height: 40px;
+  font-size: 13px;
+}
+
+/* =====================================================
    Meeting Chat UI
    ===================================================== */
 .chat-container {

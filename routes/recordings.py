@@ -10,6 +10,7 @@ from flask_login import login_required, current_user
 from services.supabase_client import get_supabase
 from services.whisper_service import transcribe_audio
 from services.summarizer_service import summarize_transcript
+from services.title_service import generate_title
 
 logger = logging.getLogger(__name__)
 
@@ -109,12 +110,8 @@ def upload_recording():
         logger.error("Whisper transcription failed: %s", exc)
         return jsonify({"error": "Transcription failed", "detail": str(exc)}), 502
 
-    # Generate a default title from the transcript
-    title_text = transcript.replace("\n", " ").strip()
-    if len(title_text) > 60:
-        title_text = title_text[:57] + "..."
-    if not title_text:
-        title_text = f"Meeting - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+    # Use a generic placeholder title (user can name it or use AI generate)
+    title_text = f"Meeting - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
 
     # Save meeting record
     try:
@@ -136,6 +133,47 @@ def upload_recording():
         "transcript": transcript,
         "title": meeting["title"],
     })
+
+
+# ---------------------------------------------------------------------------
+# POST /api/recordings/generate-title
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/generate-title", methods=["POST"])
+@login_required
+def generate_meeting_title():
+    """Use AI to generate a concise meeting title from the transcript."""
+    data = request.get_json(force=True) or {}
+    meeting_id = data.get("meeting_id")
+
+    if not meeting_id:
+        return jsonify({"error": "meeting_id is required"}), 400
+
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("meetings")
+            .select("transcript")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .single()
+            .execute()
+        )
+        if not result.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        transcript = result.data.get("transcript", "")
+        if not transcript:
+            return jsonify({"error": "No transcript available"}), 400
+
+        title = generate_title(transcript)
+
+        # Save the title to the meeting
+        supabase.table("meetings").update({"title": title}).eq("id", meeting_id).execute()
+
+        return jsonify({"title": title})
+    except Exception as exc:
+        logger.error("Failed to generate title: %s", exc)
+        return jsonify({"error": f"Failed to generate title: {exc}"}), 502
 
 
 # ---------------------------------------------------------------------------

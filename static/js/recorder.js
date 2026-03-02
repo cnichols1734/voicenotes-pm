@@ -216,7 +216,7 @@ window.RecorderModule = (() => {
             });
             currentMeetingId = data.meeting_id;
             currentTranscript = data.transcript;
-            if (getEl('meeting-title-input')) getEl('meeting-title-input').value = data.title || '';
+            if (getEl('meeting-title-input')) getEl('meeting-title-input').value = '';
 
             // Show the new meeting in the list right away (status: selecting_type)
             if (window.MeetingsModule && window.MeetingsModule.reload) {
@@ -333,6 +333,29 @@ window.RecorderModule = (() => {
     // ---------------------------------------------------------------------------
     // Event bindings (called once on DOMContentLoaded)
     // ---------------------------------------------------------------------------
+    async function generateAITitle() {
+        const btn = getEl('ai-title-btn');
+        const input = getEl('meeting-title-input');
+        if (!btn || !input || !currentMeetingId) return;
+
+        const origText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Generating...';
+
+        try {
+            const data = await api('/api/recordings/generate-title', {
+                method: 'POST',
+                body: { meeting_id: currentMeetingId },
+            });
+            input.value = data.title || '';
+        } catch (err) {
+            showToast(`Failed to generate title: ${err.message}`, 'error');
+        }
+
+        btn.disabled = false;
+        btn.textContent = origText;
+    }
+
     function bindEvents() {
         const stopBtn = getEl('stop-recording-btn');
         if (stopBtn) stopBtn.addEventListener('click', stopRecording);
@@ -342,6 +365,9 @@ window.RecorderModule = (() => {
 
         const genBtn = getEl('generate-summary-btn');
         if (genBtn) genBtn.addEventListener('click', generateSummary);
+
+        const aiTitleBtn = getEl('ai-title-btn');
+        if (aiTitleBtn) aiTitleBtn.addEventListener('click', generateAITitle);
     }
 
     document.addEventListener('DOMContentLoaded', bindEvents);
