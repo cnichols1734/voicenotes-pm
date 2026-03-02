@@ -29,10 +29,18 @@ window.ChatModule = (() => {
         const clearBtn = getEl('chat-clear-btn');
 
         if (input) {
+            function updateSendState() {
+                if (sendBtn) sendBtn.disabled = !input.value.trim() || isStreaming;
+            }
+
             input.addEventListener('input', () => {
                 autoGrow(input);
-                sendBtn.disabled = !input.value.trim() || isStreaming;
+                updateSendState();
             });
+            // iOS doesn't always fire 'input' reliably — cover all bases
+            input.addEventListener('keyup', updateSendState);
+            input.addEventListener('change', updateSendState);
+            input.addEventListener('focus', updateSendState);
 
             input.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {

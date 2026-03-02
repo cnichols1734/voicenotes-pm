@@ -2841,3 +2841,14 @@ select {
     text-align: center;
   }
 }
+
+/* =====================================================
+   iOS zoom prevention — 16px minimum on all inputs
+   ===================================================== */
+@supports (-webkit-touch-callout: none) {
+  input, textarea, select,
+  .form-input, .form-textarea, .form-select,
+  .search-input, .chat-input {
+    font-size: 16px !important;
+  }
+}
