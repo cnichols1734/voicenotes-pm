@@ -248,6 +248,11 @@ window.MeetingsModule = (() => {
             renderTranscript(meeting.transcript);
             populateDetailFolderSelect(folders, meeting.folder_id);
             populateResurfaceGrid(types);
+
+            // Init chat if meeting is complete
+            if (meeting.status === 'complete' && window.ChatModule) {
+                window.ChatModule.init(meetingId);
+            }
         } catch (err) {
             showToast(`Failed to load meeting: ${err.message}`, 'error');
         }

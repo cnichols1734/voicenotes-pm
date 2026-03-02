@@ -115,6 +115,22 @@ CREATE TRIGGER meetings_updated_at
     FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 -- ============================================
+-- CHAT MESSAGES
+-- Per-meeting chat history with AI assistant
+-- ============================================
+CREATE TABLE chat_messages (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_chat_messages_meeting ON chat_messages(meeting_id, created_at);
+CREATE INDEX idx_chat_messages_user ON chat_messages(user_id);
+
+-- ============================================
 -- NOTE: Default meeting types are seeded per-user
 -- on first registration via services/seed_defaults.py
 -- ============================================
