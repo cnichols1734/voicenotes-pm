@@ -82,34 +82,123 @@ window.MeetingsModule = (() => {
 
     function buildMeetingCard(meeting, types) {
         const type = types.find(t => t.id === meeting.meeting_type_id);
+        const folders = window.AppState.folders || [];
+        const folder = folders.find(f => f.id === meeting.folder_id);
         const summary = meeting.summary || {};
         const preview = summary.executive_summary
             ? (summary.executive_summary.length > 120 ? summary.executive_summary.slice(0, 120) + '...' : summary.executive_summary)
             : '';
 
-        const card = document.createElement('button');
+        const card = document.createElement('div');
         card.className = 'meeting-card';
         card.dataset.meetingId = meeting.id;
-        card.addEventListener('click', () => {
+
+        const typeBadge = type ? `<span class="badge badge-type"><i data-lucide="${type.icon || 'file-text'}"></i> ${type.name}</span>` : '';
+        const folderBadge = folder ? `<span class="badge badge-folder"><i data-lucide="folder"></i> ${escapeHtml(folder.name)}</span>` : '';
+
+        card.innerHTML = `
+      <div class="meeting-card-body">
+        <div class="meeting-card-header">
+          <div class="meeting-card-title">${escapeHtml(meeting.title)}</div>
+        </div>
+        <div class="meeting-card-meta">
+          ${typeBadge}${folderBadge}
+          <span class="badge-date">${formatDate(meeting.recorded_at)}</span>
+          ${meeting.duration_seconds ? `<span class="badge-date">${formatDuration(meeting.duration_seconds)}</span>` : ''}
+        </div>
+        ${preview ? `<div class="meeting-card-preview">${escapeHtml(preview)}</div>` : ''}
+      </div>
+      <div class="meeting-card-actions">
+        <button class="card-action-btn card-move-btn" title="Move to folder">
+          <i data-lucide="folder-input"></i>
+        </button>
+      </div>
+    `;
+
+        // Click body to navigate
+        const body = card.querySelector('.meeting-card-body');
+        body.addEventListener('click', () => {
             window.location.href = `/meeting/${meeting.id}`;
         });
 
-        const typeBadge = type ? `<span class="badge badge-type"><i data-lucide="${type.icon || 'file-text'}"></i> ${type.name}</span>` : '';
-        const folderBadge = meeting.folder_id ? '' : ''; // Folder name requires join; skip for now
-
-        card.innerHTML = `
-      <div class="meeting-card-header">
-        <div class="meeting-card-title">${escapeHtml(meeting.title)}</div>
-      </div>
-      <div class="meeting-card-meta">
-        ${typeBadge}
-        <span class="badge-date">${formatDate(meeting.recorded_at)}</span>
-        ${meeting.duration_seconds ? `<span class="badge-date">${formatDuration(meeting.duration_seconds)}</span>` : ''}
-      </div>
-      ${preview ? `<div class="meeting-card-preview">${escapeHtml(preview)}</div>` : ''}
-    `;
+        // Move-to-folder button
+        const moveBtn = card.querySelector('.card-move-btn');
+        moveBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            openMoveModal(meeting);
+        });
 
         return card;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Move-to-folder modal (dashboard)
+    // ---------------------------------------------------------------------------
+    function openMoveModal(meeting) {
+        let modal = document.getElementById('move-folder-modal');
+        if (!modal) {
+            modal = document.createElement('div');
+            modal.id = 'move-folder-modal';
+            modal.className = 'modal-backdrop';
+            modal.innerHTML = `
+              <div class="modal" style="max-width:400px;">
+                <div class="modal-header">
+                  <h3 class="modal-title">Move to Folder</h3>
+                  <button class="modal-close" id="move-modal-close">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+                <div class="modal-body">
+                  <div class="move-folder-list" id="move-folder-list"></div>
+                </div>
+              </div>
+            `;
+            document.body.appendChild(modal);
+            modal.querySelector('#move-modal-close').addEventListener('click', () => {
+                modal.classList.remove('visible');
+            });
+            modal.addEventListener('click', (e) => {
+                if (e.target === modal) modal.classList.remove('visible');
+            });
+        }
+
+        const list = modal.querySelector('#move-folder-list');
+        const folders = window.AppState.folders || [];
+        list.innerHTML = '';
+
+        // "No Folder" option
+        const noFolderBtn = document.createElement('button');
+        noFolderBtn.className = `move-folder-option ${!meeting.folder_id ? 'active' : ''}`;
+        noFolderBtn.innerHTML = `<i data-lucide="inbox"></i><span>No Folder</span>`;
+        noFolderBtn.addEventListener('click', () => moveMeetingToFolder(meeting.id, null, modal));
+        list.appendChild(noFolderBtn);
+
+        folders.forEach(f => {
+            const btn = document.createElement('button');
+            btn.className = `move-folder-option ${meeting.folder_id === f.id ? 'active' : ''}`;
+            btn.innerHTML = `<span class="move-folder-dot" style="background:${f.color};"></span><span>${escapeHtml(f.name)}</span>`;
+            btn.addEventListener('click', () => moveMeetingToFolder(meeting.id, f.id, modal));
+            list.appendChild(btn);
+        });
+
+        modal.classList.add('visible');
+        if (window.lucide) lucide.createIcons();
+    }
+
+    async function moveMeetingToFolder(meetingId, folderId, modal) {
+        try {
+            await api(`/api/recordings/${meetingId}`, {
+                method: 'PUT',
+                body: { folder_id: folderId },
+            });
+            modal.classList.remove('visible');
+            showToast('Moved to folder.', 'success');
+            await reload();
+        } catch (err) {
+            showToast(`Failed: ${err.message}`, 'error');
+        }
     }
 
     // ---------------------------------------------------------------------------

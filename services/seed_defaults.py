@@ -2,6 +2,7 @@
 VoiceNotes PM - Seed default meeting types.
 Called per-user on registration to populate their meeting_types.
 """
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -9,7 +10,7 @@ logger = logging.getLogger(__name__)
 MEETING_TYPE_DEFAULTS = [
     {
         "name": "Engineering Kickoff",
-        "icon": "🚀",
+        "icon": "rocket",
         "description": "New feature kickoffs and technical discussions with engineering",
         "is_default": True,
         "sort_order": 0,
@@ -55,7 +56,7 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
     },
     {
         "name": "Stakeholder Problem-Solving",
-        "icon": "🔍",
+        "icon": "search",
         "description": "Working sessions with stakeholders to diagnose and solve issues",
         "is_default": True,
         "sort_order": 1,
@@ -103,7 +104,7 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
     },
     {
         "name": "Boss 1:1",
-        "icon": "👔",
+        "icon": "briefcase",
         "description": "1-on-1 meetings with Head of Product or direct manager",
         "is_default": True,
         "sort_order": 2,
@@ -303,28 +304,43 @@ def seed_meeting_types_for_user(user_id: str):
     """Seed the default meeting types for a specific user."""
     try:
         from services.supabase_client import get_supabase
+
         supabase = get_supabase()
 
         # Check if user already has meeting types
-        result = supabase.table("meeting_types").select("id", count="exact").eq("user_id", user_id).execute()
+        result = (
+            supabase.table("meeting_types")
+            .select("id", count="exact")
+            .eq("user_id", user_id)
+            .execute()
+        )
         count = result.count if result.count is not None else len(result.data)
 
         if count == 0:
             logger.info("Seeding default meeting types for user %s...", user_id)
             rows = [{**mt, "user_id": user_id} for mt in MEETING_TYPE_DEFAULTS]
             supabase.table("meeting_types").insert(rows).execute()
-            logger.info("Successfully seeded %d default meeting types for user %s.", len(rows), user_id)
+            logger.info(
+                "Successfully seeded %d default meeting types for user %s.",
+                len(rows),
+                user_id,
+            )
         else:
-            logger.info("User %s already has %d meeting types. Skipping seed.", user_id, count)
+            logger.info(
+                "User %s already has %d meeting types. Skipping seed.", user_id, count
+            )
 
     except Exception as exc:
         logger.warning(
             "Could not seed default meeting types for user %s: %s",
-            user_id, exc,
+            user_id,
+            exc,
         )
 
 
 # Keep backward compat — called from old app startup path (now unused)
 def seed_default_meeting_types():
     """Legacy: no-op since meeting types are now seeded per-user."""
-    logger.info("Meeting types are now seeded per-user on registration. Skipping global seed.")
+    logger.info(
+        "Meeting types are now seeded per-user on registration. Skipping global seed."
+    )

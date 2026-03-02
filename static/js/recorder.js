@@ -282,7 +282,7 @@ window.RecorderModule = (() => {
             (data.folders || []).forEach(f => {
                 const opt = document.createElement('option');
                 opt.value = f.id;
-                opt.textContent = `${f.icon} ${f.name}`;
+                opt.textContent = f.name;
                 select.appendChild(opt);
             });
         } catch (e) { /* Silently skip if no folders */ }

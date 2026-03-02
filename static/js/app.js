@@ -95,6 +95,9 @@ window.api = async function (endpoint, options = {}) {
 document.addEventListener('DOMContentLoaded', () => {
     const page = window.PAGE || '';
 
+    // Hamburger nav menu (all pages)
+    initNavMenu();
+
     if (page === 'dashboard') {
         initDashboard();
     } else if (page === 'detail') {
@@ -103,6 +106,43 @@ document.addEventListener('DOMContentLoaded', () => {
         initMeetingTypesPage();
     }
 });
+
+// ---------------------------------------------------------------------------
+// Mobile nav menu (hamburger)
+// ---------------------------------------------------------------------------
+function initNavMenu() {
+    const hamburger = document.getElementById('nav-hamburger');
+    const navLinks = document.getElementById('nav-links');
+    const backdrop = document.getElementById('nav-menu-backdrop');
+
+    if (!hamburger || !navLinks) return;
+
+    function openMenu() {
+        navLinks.classList.add('open');
+        if (backdrop) backdrop.classList.add('visible');
+    }
+    function closeMenu() {
+        navLinks.classList.remove('open');
+        if (backdrop) backdrop.classList.remove('visible');
+    }
+
+    hamburger.addEventListener('click', () => {
+        if (navLinks.classList.contains('open')) {
+            closeMenu();
+        } else {
+            openMenu();
+        }
+    });
+
+    if (backdrop) {
+        backdrop.addEventListener('click', closeMenu);
+    }
+
+    // Close menu when a nav link is clicked (mobile)
+    navLinks.querySelectorAll('.nav-link').forEach(link => {
+        link.addEventListener('click', closeMenu);
+    });
+}
 
 function initDashboard() {
     // Load folders and meetings in parallel
@@ -119,15 +159,55 @@ function initDashboard() {
         });
     }
 
-    // Sidebar hamburger for mobile
-    const backdrop = document.getElementById('sidebar-backdrop');
+    // Sidebar toggle + backdrop for mobile
     const sidebar = document.getElementById('sidebar');
-    if (backdrop) {
-        backdrop.addEventListener('click', () => {
-            sidebar && sidebar.classList.remove('open');
-            backdrop.classList.remove('visible');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    const sidebarToggle = document.getElementById('sidebar-toggle');
+
+    function openSidebar() {
+        if (sidebar) sidebar.classList.add('open');
+        if (backdrop) backdrop.classList.add('visible');
+    }
+
+    function closeSidebar() {
+        if (sidebar) sidebar.classList.remove('open');
+        if (backdrop) backdrop.classList.remove('visible');
+    }
+
+    if (sidebarToggle) {
+        sidebarToggle.addEventListener('click', () => {
+            if (sidebar && sidebar.classList.contains('open')) {
+                closeSidebar();
+            } else {
+                openSidebar();
+            }
         });
     }
+
+    if (backdrop) {
+        backdrop.addEventListener('click', closeSidebar);
+    }
+
+    // Auto-close sidebar when a sidebar item is clicked (mobile)
+    document.querySelectorAll('.sidebar-item').forEach(item => {
+        item.addEventListener('click', () => {
+            if (window.innerWidth <= 1024) closeSidebar();
+        });
+    });
+
+    // Also observe dynamically-added sidebar items via event delegation
+    const sidebarEl = document.getElementById('sidebar');
+    if (sidebarEl) {
+        sidebarEl.addEventListener('click', (e) => {
+            const item = e.target.closest('.sidebar-item');
+            if (item && window.innerWidth <= 1024) {
+                closeSidebar();
+            }
+        });
+    }
+
+    // Expose closeSidebar globally so folders.js can use it if needed
+    window._closeSidebar = closeSidebar;
 }
 
 function initDetailPage() {

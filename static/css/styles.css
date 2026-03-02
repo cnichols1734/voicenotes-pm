@@ -1064,9 +1064,7 @@ select {
   border-bottom: 1px solid var(--border-subtle);
 }
 
-.summary-section-icon {
-  font-size: 18px;
-}
+/* Old .summary-section-icon overridden below in new section */
 
 .summary-section-title {
   font-size: 16px;
@@ -1339,16 +1337,6 @@ select {
   flex-wrap: wrap;
 }
 
-.detail-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 20px;
-  padding-top: 20px;
-  border-top: 1px solid var(--border-subtle);
-  flex-wrap: wrap;
-}
-
 /* =====================================================
    Meeting Types Page
    ===================================================== */
@@ -1614,7 +1602,49 @@ select {
 }
 
 /* =====================================================
+   Sidebar Toggle Button (mobile filter access)
+   ===================================================== */
+.sidebar-toggle {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-default);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border-radius: var(--radius-full);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.sidebar-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+
+.sidebar-toggle:active {
+  transform: scale(0.96);
+}
+
+.sidebar-toggle svg {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.sidebar-toggle-label {
+  line-height: 1;
+}
+
+/* =====================================================
    Responsive
+   ===================================================== */
+/* =====================================================
+   Responsive - Sidebar
    ===================================================== */
 @media (max-width: 1024px) {
   .sidebar {
@@ -1645,6 +1675,10 @@ select {
 
   .sidebar-backdrop.visible {
     display: block;
+  }
+
+  .sidebar-toggle {
+    display: flex;
   }
 }
 
@@ -1916,6 +1950,18 @@ select {
   white-space: nowrap;
 }
 
+.nav-user-link {
+  transition: opacity var(--transition-fast);
+}
+
+.nav-user-link:hover {
+  opacity: 0.8;
+}
+
+.nav-user-link:hover .nav-user-name {
+  color: var(--text-primary);
+}
+
 .nav-logout-btn {
   padding: 4px 6px !important;
   color: var(--text-tertiary) !important;
@@ -2089,5 +2135,347 @@ select {
   .admin-table th:nth-child(4),
   .admin-table td:nth-child(4) {
     display: none;
+  }
+}
+
+/* =====================================================
+   Meeting Card Layout (body + actions)
+   ===================================================== */
+.meeting-card {
+  display: flex;
+  align-items: stretch;
+  padding: 0;
+  gap: 0;
+}
+
+.meeting-card-body {
+  flex: 1;
+  padding: 20px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.meeting-card-actions {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-left: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.card-action-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.card-action-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.card-action-btn svg,
+.card-action-btn i {
+  width: 16px;
+  height: 16px;
+}
+
+/* =====================================================
+   Move-to-Folder Modal
+   ===================================================== */
+.move-folder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.move-folder-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  text-align: left;
+  font-family: var(--font-sans);
+}
+
+.move-folder-option:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.move-folder-option.active {
+  background: var(--accent-primary-muted);
+  color: var(--accent-primary);
+}
+
+.move-folder-option i {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.move-folder-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+}
+
+/* =====================================================
+   Detail Page Action Bar (split layout)
+   ===================================================== */
+.detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+
+.detail-actions-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.detail-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.detail-folder-move {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.detail-folder-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.detail-folder-select {
+  min-width: 160px;
+  height: 36px;
+  font-size: 13px;
+}
+
+/* =====================================================
+   Summary Section Icons (Lucide)
+   ===================================================== */
+.summary-section-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-primary-muted);
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.summary-section-icon i,
+.summary-section-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* =====================================================
+   Hamburger Menu Button
+   ===================================================== */
+.nav-hamburger {
+  display: none;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.nav-hamburger:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* =====================================================
+   Account Settings Page
+   ===================================================== */
+.account-page {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 40px 32px;
+}
+
+.account-header {
+  margin-bottom: 32px;
+}
+
+.account-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 24px;
+  margin-bottom: 16px;
+}
+
+.account-section-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.account-save-btn {
+  margin-top: 8px;
+}
+
+.account-flash {
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 12px;
+}
+
+.account-flash-success {
+  background: rgba(50, 215, 75, 0.12);
+  color: var(--accent-success);
+  border: 1px solid rgba(50, 215, 75, 0.2);
+}
+
+.account-flash-error {
+  background: rgba(255, 69, 58, 0.12);
+  color: var(--accent-danger);
+  border: 1px solid rgba(255, 69, 58, 0.2);
+}
+
+/* =====================================================
+   Mobile-First Nav Responsive
+   ===================================================== */
+@media (max-width: 1024px) {
+  .nav-hamburger {
+    display: flex;
+  }
+
+  .nav-links {
+    position: fixed;
+    top: var(--nav-height);
+    right: 0;
+    width: 260px;
+    height: calc(100vh - var(--nav-height));
+    background: var(--bg-elevated);
+    border-left: 1px solid var(--border-subtle);
+    flex-direction: column;
+    align-items: stretch;
+    padding: 16px 12px;
+    gap: 4px;
+    transform: translateX(100%);
+    transition: transform var(--transition-default);
+    z-index: 300;
+    overflow-y: auto;
+  }
+
+  .nav-links.open {
+    transform: translateX(0);
+  }
+
+  .nav-link {
+    padding: 10px 12px;
+    font-size: 15px;
+  }
+
+  .nav-user {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: none;
+    padding-top: 12px;
+    margin-top: 8px;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .nav-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    top: var(--nav-height);
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 290;
+    display: none;
+  }
+
+  .nav-menu-backdrop.visible {
+    display: block;
+  }
+}
+
+@media (max-width: 768px) {
+  .nav {
+    padding: 0 16px;
+    gap: 12px;
+  }
+
+  .detail-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .detail-actions-left,
+  .detail-actions-right {
+    width: 100%;
+  }
+
+  .detail-actions-right {
+    flex-wrap: wrap;
+  }
+
+  .detail-folder-select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .account-page {
+    padding: 24px 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .detail-actions-right .btn {
+    flex: 1;
+    min-width: 0;
   }
 }

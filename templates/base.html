@@ -23,7 +23,21 @@
       </svg>
       VoiceNotes PM
     </a>
-    <nav class="nav-links">
+
+    <!-- Hamburger menu button (visible on mobile) -->
+    <button class="nav-hamburger" id="nav-hamburger" aria-label="Open menu">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round">
+        <line x1="3" y1="6" x2="21" y2="6" />
+        <line x1="3" y1="12" x2="21" y2="12" />
+        <line x1="3" y1="18" x2="21" y2="18" />
+      </svg>
+    </button>
+
+    <!-- Nav menu backdrop (mobile) -->
+    <div class="nav-menu-backdrop" id="nav-menu-backdrop"></div>
+
+    <nav class="nav-links" id="nav-links">
       <a href="/" class="nav-link {% if request.endpoint == 'main.index' %}active{% endif %}">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round">
@@ -61,8 +75,10 @@
       <!-- User menu -->
       {% if current_user.is_authenticated %}
       <div class="nav-user">
-        <div class="nav-user-avatar">{{ current_user.display_name[0]|upper }}</div>
-        <span class="nav-user-name">{{ current_user.display_name }}</span>
+        <a href="/account" class="nav-user-link" style="display:flex;align-items:center;gap:8px;text-decoration:none;">
+          <div class="nav-user-avatar">{{ current_user.display_name[0]|upper }}</div>
+          <span class="nav-user-name">{{ current_user.display_name }}</span>
+        </a>
         <form method="POST" action="{{ url_for('auth.logout') }}" style="display:inline;">
           <button type="submit" class="nav-link nav-logout-btn" title="Log out">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
