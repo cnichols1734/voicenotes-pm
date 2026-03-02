@@ -1,7 +1,12 @@
 """
 VoiceNotes PM - Audio chunking service.
 Splits large audio files into smaller chunks for Whisper API.
-Requires ffmpeg to be installed (available on Railway via nixpacks).
+
+Strategy:
+  1. First attempt: split raw bytes directly (fast, no ffmpeg needed).
+     Whisper is tolerant of partial segments for most codecs.
+  2. Fallback: use pydub/ffmpeg to re-encode proper segments if the
+     raw split fails during transcription.
 """
 import io
 import logging
@@ -21,16 +26,48 @@ def _check_ffmpeg():
         )
 
 
-def chunk_audio(
+def chunk_audio_raw(audio_bytes: bytes, max_chunk_mb: int = 24) -> list:
+    """
+    Split audio into byte-level chunks without decoding.
+
+    This is extremely fast (no ffmpeg needed) and works well with Whisper,
+    which is tolerant of partial audio segments.
+
+    Returns a list of bytes objects, one per chunk.
+    """
+    max_bytes = max_chunk_mb * 1024 * 1024
+    total_bytes = len(audio_bytes)
+    num_chunks = math.ceil(total_bytes / max_bytes)
+
+    logger.info(
+        "Raw-splitting %.1f MB audio into %d chunks (max %d MB each).",
+        total_bytes / (1024 * 1024),
+        num_chunks,
+        max_chunk_mb,
+    )
+
+    chunks = []
+    for i in range(num_chunks):
+        start = i * max_bytes
+        end = min(start + max_bytes, total_bytes)
+        chunk = audio_bytes[start:end]
+        chunks.append(chunk)
+        logger.info("Chunk %d: %.1f MB", i + 1, len(chunk) / (1024 * 1024))
+
+    return chunks
+
+
+def chunk_audio_pydub(
     audio_bytes: bytes,
     file_format: str = "webm",
     max_chunk_mb: int = 24,
 ) -> list:
     """
-    Split audio into chunks no larger than max_chunk_mb.
+    Split audio into chunks using pydub (ffmpeg).
 
-    Uses pydub to load the audio, splits it into equal-duration segments,
-    and exports each segment back to bytes in the original format.
+    This decodes the audio, splits by duration, and re-encodes each chunk.
+    More reliable for codecs that don't tolerate byte-level splits, but
+    much slower because it must decode the entire file.
 
     Returns a list of bytes objects, one per chunk.
     """
@@ -48,7 +85,7 @@ def chunk_audio(
     num_chunks = math.ceil(total_bytes / max_bytes)
 
     logger.info(
-        "Chunking %.1f MB audio into %d chunks (max %d MB each).",
+        "Pydub-chunking %.1f MB audio into %d chunks (max %d MB each).",
         total_bytes / (1024 * 1024),
         num_chunks,
         max_chunk_mb,
@@ -70,3 +107,7 @@ def chunk_audio(
         logger.info("Chunk %d: %.1f MB", i + 1, len(chunks[-1]) / (1024 * 1024))
 
     return chunks
+
+
+# Keep legacy name for backwards compatibility
+chunk_audio = chunk_audio_pydub
