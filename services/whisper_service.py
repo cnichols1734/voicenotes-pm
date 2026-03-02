@@ -1,19 +1,27 @@
 """
 VoiceNotes PM - Whisper transcription service.
-Sends audio to OpenAI Whisper API and returns the transcript text.
+
+Supports two backends:
+  1. Local / self-hosted Whisper (via LM Studio, etc.) — tried first if WHISPER_BASE_URL is set
+  2. OpenAI Whisper API — used as fallback, or as primary if no local URL configured
+
+Both backends use the OpenAI-compatible API format, so the same SDK works for both.
 """
 import io
 import logging
+import time
 
 import openai
 
 from config import Config
-from services.audio_processing import chunk_audio_raw, chunk_audio_pydub
 
 logger = logging.getLogger(__name__)
 
 # Whisper API limit is 25MB; use 24MB as a safe ceiling
 WHISPER_MAX_BYTES = 24 * 1024 * 1024  # 24 MB
+
+# Timeout for local Whisper requests (seconds)
+LOCAL_WHISPER_TIMEOUT = 120
 
 
 class NamedBytesIO(io.BytesIO):
@@ -24,64 +32,89 @@ class NamedBytesIO(io.BytesIO):
         self.name = name
 
 
+def _get_local_client():
+    """Create an OpenAI client pointed at the local Whisper endpoint."""
+    if not Config.WHISPER_BASE_URL:
+        return None
+    return openai.OpenAI(
+        api_key=Config.WHISPER_API_KEY,
+        base_url=Config.WHISPER_BASE_URL,
+        timeout=LOCAL_WHISPER_TIMEOUT,
+    )
+
+
+def _get_openai_client():
+    """Create a standard OpenAI client."""
+    return openai.OpenAI(api_key=Config.OPENAI_API_KEY)
+
+
+def _transcribe_with_client(client, audio_bytes: bytes, file_format: str, model: str) -> str:
+    """Send audio to a Whisper-compatible endpoint and return transcript text."""
+    file_obj = NamedBytesIO(audio_bytes, name=f"audio.{file_format}")
+    response = client.audio.transcriptions.create(
+        model=model,
+        file=file_obj,
+    )
+    return response.text.strip()
+
+
 def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> str:
     """
-    Transcribe audio using OpenAI Whisper API.
+    Transcribe audio using Whisper.
 
-    Accepts raw audio bytes and format string (e.g. 'webm').
-    If audio exceeds 24 MB, chunks it using fast raw byte splitting
-    (falls back to pydub if raw splitting fails at the Whisper API level).
+    Strategy:
+      1. If WHISPER_BASE_URL is configured, try the local/self-hosted endpoint first.
+      2. If local fails (connection error, timeout, etc.), fall back to OpenAI.
+      3. If no local URL is configured, go straight to OpenAI.
+
+    With streaming transcription, each chunk is typically ~60s of audio (< 2 MB),
+    so chunking is rarely needed. The chunking logic is kept as a safety net for
+    the legacy upload path.
 
     Returns the full transcript as a single string.
     """
-    if len(audio_bytes) < 1000:
-        raise ValueError("Recording too short (under 1 KB). Please record at least a few seconds.")
+    if len(audio_bytes) < 500:
+        return ""
 
-    client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
+    size_mb = len(audio_bytes) / (1024 * 1024)
 
-    if len(audio_bytes) > WHISPER_MAX_BYTES:
-        logger.info(
-            "Audio is %.1f MB, chunking before transcription.",
-            len(audio_bytes) / (1024 * 1024),
-        )
-        # Try fast raw byte split first (no ffmpeg, instant)
-        chunks = chunk_audio_raw(audio_bytes, max_chunk_mb=24)
-        use_raw = True
-    else:
-        chunks = [audio_bytes]
-        use_raw = False
+    # --- Try local Whisper first ---
+    local_client = _get_local_client()
+    if local_client:
+        try:
+            logger.info("Trying local Whisper (%.1f MB)...", size_mb)
+            start = time.time()
+            text = _transcribe_with_client(
+                local_client, audio_bytes, file_format,
+                model="whisper-large-v3-turbo",
+            )
+            elapsed = time.time() - start
+            logger.info("Local Whisper succeeded in %.1fs.", elapsed)
+            return text
+        except Exception as exc:
+            logger.warning("Local Whisper failed (%.1f MB): %s. Falling back to OpenAI.", size_mb, exc)
 
+    # --- Fallback: OpenAI Whisper API ---
+    logger.info("Using OpenAI Whisper (%.1f MB)...", size_mb)
+    openai_client = _get_openai_client()
+
+    # For streaming chunks (< 24 MB), send directly
+    if len(audio_bytes) <= WHISPER_MAX_BYTES:
+        start = time.time()
+        text = _transcribe_with_client(openai_client, audio_bytes, file_format, model="whisper-1")
+        elapsed = time.time() - start
+        logger.info("OpenAI Whisper succeeded in %.1fs.", elapsed)
+        return text
+
+    # Legacy path: large file from non-streaming upload — chunk it with pydub
+    logger.info("Audio exceeds 24 MB, using pydub chunking for OpenAI...")
+    from services.audio_processing import chunk_audio_pydub
+
+    chunks = chunk_audio_pydub(audio_bytes, file_format=file_format)
     transcripts = []
     for idx, chunk in enumerate(chunks):
-        logger.info("Transcribing chunk %d / %d (%.1f MB)...", idx + 1, len(chunks), len(chunk) / (1024 * 1024))
-        file_obj = NamedBytesIO(chunk, name=f"audio_{idx}.{file_format}")
-        try:
-            response = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=file_obj,
-            )
-            transcripts.append(response.text.strip())
-        except Exception as exc:
-            if use_raw and idx == 0:
-                # Raw byte split didn't work for this codec; fall back to pydub
-                logger.warning(
-                    "Raw byte split failed at Whisper API (chunk %d): %s. "
-                    "Falling back to pydub chunking.",
-                    idx, exc,
-                )
-                chunks = chunk_audio_pydub(audio_bytes, file_format=file_format)
-                # Restart transcription with properly-encoded chunks
-                transcripts = []
-                for j, pydub_chunk in enumerate(chunks):
-                    logger.info("Transcribing pydub chunk %d / %d...", j + 1, len(chunks))
-                    pydub_file = NamedBytesIO(pydub_chunk, name=f"audio_{j}.{file_format}")
-                    resp = client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=pydub_file,
-                    )
-                    transcripts.append(resp.text.strip())
-                break
-            else:
-                raise
+        logger.info("Transcribing pydub chunk %d / %d (%.1f MB)...", idx + 1, len(chunks), len(chunk) / (1024 * 1024))
+        text = _transcribe_with_client(openai_client, chunk, file_format, model="whisper-1")
+        transcripts.append(text)
 
     return "\n\n".join(transcripts)

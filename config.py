@@ -11,6 +11,8 @@ class Config:
     SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
     SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
     OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+    WHISPER_BASE_URL = os.environ.get("WHISPER_BASE_URL", "")  # e.g. http://your-tunnel.trycloudflare.com/v1
+    WHISPER_API_KEY = os.environ.get("WHISPER_API_KEY", "lm-studio")  # LM Studio doesn't need a real key
     OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
     OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "minimax/minimax-m2.5")
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
