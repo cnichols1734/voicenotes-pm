@@ -198,11 +198,26 @@ window.RecorderModule = (() => {
 
             const jobId = submitData.job_id;
 
-            // Step 2: Poll for result
+            // Step 2: Poll for result (tolerates transient network errors)
             let transcript = null;
+            let pollErrors = 0;
+            const MAX_POLL_ERRORS = 10; // give up after 10 consecutive failures
+
             while (true) {
                 await new Promise(r => setTimeout(r, 3000));
-                const status = await api(`/api/recordings/diarize-status/${jobId}`);
+
+                let status;
+                try {
+                    status = await api(`/api/recordings/diarize-status/${jobId}`);
+                    pollErrors = 0; // reset on success
+                } catch (pollErr) {
+                    pollErrors++;
+                    console.warn(`Poll error ${pollErrors}/${MAX_POLL_ERRORS}:`, pollErr.message);
+                    if (pollErrors >= MAX_POLL_ERRORS) {
+                        throw new Error('Lost connection to server. Your recording may still be processing — check your meetings list.');
+                    }
+                    continue; // retry on next interval
+                }
 
                 if (status.status === 'complete') {
                     transcript = status.transcript;
