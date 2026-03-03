@@ -25,6 +25,9 @@ WHISPER_MAX_BYTES = 24 * 1024 * 1024  # 24 MB
 # Timeout for local Whisper requests (seconds)
 LOCAL_WHISPER_TIMEOUT = 120
 
+# Timeout for full-audio diarization (long meetings can take several minutes)
+DIARIZE_TIMEOUT = 600  # 10 minutes
+
 
 class NamedBytesIO(io.BytesIO):
     """BytesIO subclass that carries a filename attribute for the OpenAI SDK."""
@@ -59,7 +62,7 @@ def _convert_to_wav(audio_bytes: bytes, file_format: str) -> bytes:
                 tmp_out_path,
             ],
             capture_output=True,
-            timeout=30,
+            timeout=120,
         )
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg conversion failed: {result.stderr.decode()[:200]}")
@@ -196,3 +199,44 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> str:
         transcripts.append(text)
 
     return "\n\n".join(transcripts)
+
+
+def diarize_audio(audio_bytes: bytes, file_format: str = "webm") -> str:
+    """
+    Diarize + transcribe audio using the local whisper-monitor /diarize endpoint.
+
+    Sends the full recording at once for accurate cross-meeting speaker identification.
+    Returns a speaker-labeled transcript (e.g. "Speaker 1: ... \\n\\nSpeaker 2: ...").
+
+    No fallback to OpenAI — diarization requires the local pyannote service.
+    """
+    if len(audio_bytes) < 500:
+        return ""
+
+    if not Config.WHISPER_BASE_URL:
+        raise RuntimeError("WHISPER_BASE_URL not configured; diarization requires local service")
+
+    wav_bytes = _convert_to_wav(audio_bytes, file_format)
+    base_url = Config.WHISPER_BASE_URL.rstrip("/")
+
+    size_mb = len(wav_bytes) / (1024 * 1024)
+    logger.info("Sending %.1f MB to /diarize (timeout=%ds)...", size_mb, DIARIZE_TIMEOUT)
+    start = time.time()
+
+    files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
+    response = requests.post(
+        f"{base_url}/diarize",
+        files=files,
+        timeout=DIARIZE_TIMEOUT,
+    )
+    response.raise_for_status()
+
+    result = response.json()
+    text = result.get("text", "").strip()
+    elapsed = time.time() - start
+    logger.info("Diarization completed in %.1fs, transcript length: %d chars", elapsed, len(text))
+
+    if not text:
+        raise RuntimeError("Diarization returned empty transcript")
+
+    return text
