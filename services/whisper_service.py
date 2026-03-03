@@ -228,6 +228,7 @@ def diarize_audio(
     logger.info("Sending %.1f MB to /diarize (timeout=%ds)...", size_mb, DIARIZE_TIMEOUT)
     start = time.time()
 
+    # Step 1: Submit audio for async diarization on Mac
     files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
     data = {}
     if min_speakers is not None:
@@ -239,12 +240,41 @@ def diarize_audio(
         f"{base_url}/diarize",
         files=files,
         data=data,
-        timeout=DIARIZE_TIMEOUT,
+        timeout=60,  # Upload should complete quickly
     )
     response.raise_for_status()
-
     result = response.json()
-    text = result.get("text", "").strip()
+
+    # Check if Mac returned a job_id (async) or direct text (legacy sync)
+    if "job_id" in result:
+        # Step 2: Poll Mac for diarization result
+        job_id = result["job_id"]
+        logger.info("Diarize job submitted to Mac: %s", job_id)
+
+        poll_interval = 3  # seconds
+        while True:
+            time.sleep(poll_interval)
+            elapsed = time.time() - start
+            if elapsed > DIARIZE_TIMEOUT:
+                raise RuntimeError(f"Diarization timed out after {int(elapsed)}s")
+
+            status_resp = requests.get(
+                f"{base_url}/diarize-status/{job_id}",
+                timeout=30,
+            )
+            status_resp.raise_for_status()
+            status_data = status_resp.json()
+
+            if status_data.get("status") == "complete":
+                text = status_data.get("text", "").strip()
+                break
+            elif status_data.get("status") == "error":
+                raise RuntimeError(f"Mac diarization failed: {status_data.get('error', 'unknown')}")
+            # else still processing, continue polling
+    else:
+        # Legacy: direct text response
+        text = result.get("text", "").strip()
+
     elapsed = time.time() - start
     logger.info("Diarization completed in %.1fs, transcript length: %d chars", elapsed, len(text))
 
