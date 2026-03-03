@@ -173,12 +173,19 @@ def submit_diarize():
         return jsonify({"error": "Audio file exceeds 100 MB limit"}), 413
 
     file_format = request.form.get("format", "webm")
+    min_speakers = request.form.get("min_speakers", type=int)
+    max_speakers = request.form.get("max_speakers", type=int)
+
     job_id = str(uuid.uuid4())
     _write_job(job_id, {"status": "processing", "transcript": None, "error": None})
 
     def run_diarization():
         try:
-            transcript = diarize_audio(audio_bytes, file_format)
+            transcript = diarize_audio(
+                audio_bytes, file_format,
+                min_speakers=min_speakers,
+                max_speakers=max_speakers,
+            )
             _write_job(job_id, {"status": "complete", "transcript": transcript, "error": None})
         except Exception as exc:
             logger.error("Diarization job %s failed: %s", job_id, exc)

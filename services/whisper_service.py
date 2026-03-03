@@ -201,7 +201,12 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> str:
     return "\n\n".join(transcripts)
 
 
-def diarize_audio(audio_bytes: bytes, file_format: str = "webm") -> str:
+def diarize_audio(
+    audio_bytes: bytes,
+    file_format: str = "webm",
+    min_speakers: int = None,
+    max_speakers: int = None,
+) -> str:
     """
     Diarize + transcribe audio using the local whisper-monitor /diarize endpoint.
 
@@ -224,9 +229,16 @@ def diarize_audio(audio_bytes: bytes, file_format: str = "webm") -> str:
     start = time.time()
 
     files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
+    data = {}
+    if min_speakers is not None:
+        data["min_speakers"] = str(min_speakers)
+    if max_speakers is not None:
+        data["max_speakers"] = str(max_speakers)
+
     response = requests.post(
         f"{base_url}/diarize",
         files=files,
+        data=data,
         timeout=DIARIZE_TIMEOUT,
     )
     response.raise_for_status()
