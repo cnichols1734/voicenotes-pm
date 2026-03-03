@@ -76,25 +76,49 @@ def _convert_to_wav(audio_bytes: bytes, file_format: str) -> bytes:
             os.unlink(tmp_out_path)
 
 
-def _transcribe_local(audio_bytes: bytes, file_format: str) -> str:
+def _transcribe_local(audio_bytes: bytes, file_format: str, use_diarization: bool = True) -> str:
     """
     Transcribe audio using a local whisper.cpp server.
     Converts to WAV first (whisper.cpp needs WAV format).
-    Uses the /inference endpoint with multipart form upload.
+
+    If use_diarization is True, sends to /diarize endpoint which returns
+    speaker-labeled transcripts (e.g. "Speaker 1: Hello"). Falls back to
+    /inference if /diarize fails.
     """
     # Convert to WAV — whisper.cpp can't decode webm/opus natively
     wav_bytes = _convert_to_wav(audio_bytes, file_format)
 
-    url = Config.WHISPER_BASE_URL.rstrip("/") + "/inference"
+    base_url = Config.WHISPER_BASE_URL.rstrip("/")
     files = {
         "file": ("audio.wav", wav_bytes, "audio/wav"),
     }
+
+    # Try diarization endpoint first for speaker-labeled transcription
+    if use_diarization:
+        try:
+            response = requests.post(
+                f"{base_url}/diarize",
+                files=files,
+                timeout=LOCAL_WHISPER_TIMEOUT,
+            )
+            response.raise_for_status()
+            result = response.json()
+            text = result.get("text", "").strip()
+            if text:
+                logger.info("Local diarize returned: '%s'", text[:100])
+                return text
+        except Exception as exc:
+            logger.warning("Diarize endpoint failed (%s), falling back to /inference", exc)
+            # Re-create files dict since requests consumes the BytesIO
+            files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
+
+    # Fallback: plain transcription without speaker labels
     data = {
         "response_format": "json",
     }
 
     response = requests.post(
-        url,
+        f"{base_url}/inference",
         files=files,
         data=data,
         timeout=LOCAL_WHISPER_TIMEOUT,
