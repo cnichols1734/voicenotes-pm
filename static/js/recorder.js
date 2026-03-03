@@ -1,29 +1,39 @@
 /**
  * VoiceNotes PM - Audio recorder module.
- * Handles MediaRecorder, waveform visualization, full-audio diarization,
+ * Handles MediaRecorder, waveform visualization, streaming transcription,
  * and overlay state machine.
  *
- * Recording strategy:
- *   - Records continuously for the entire meeting (no chunking).
- *   - On stop, the full audio blob is sent to /api/recordings/diarize
- *     which runs pyannote speaker diarization + whisper transcription.
- *   - The backend returns a speaker-labeled transcript once complete.
+ * Streaming strategy:
+ *   - Every CHUNK_INTERVAL_MS (60s), the recorder is stopped and immediately
+ *     restarted. The completed segment is sent to /api/recordings/transcribe-chunk
+ *     for Whisper transcription.
+ *   - Transcript text accumulates in real time during recording.
+ *   - On final stop, the last segment is transcribed, then the meeting record
+ *     is created with the full accumulated transcript (no large upload needed).
  */
 
 window.RecorderModule = (() => {
+    // ---- Config ----
+    const CHUNK_INTERVAL_MS = 60_000; // send a chunk every 60 seconds
+
     // ---- State ----
     let stream = null;
     let mediaRecorder = null;
-    let audioChunks = [];          // all data chunks for full recording
+    let audioChunks = [];          // chunks for current segment
     let timerInterval = null;
     let elapsedSeconds = 0;
     let audioContext = null;
     let analyserNode = null;
     let animFrameId = null;
+
+    // Streaming transcription state
+    let transcriptSegments = [];   // array of transcript strings
+    let pendingTranscriptions = 0; // in-flight API calls
+    let chunkRotateInterval = null;
     let isRecording = false;
 
     // Overlay state machine
-    const STATES = ['recording', 'diarizing', 'type-select', 'details', 'summarizing', 'complete'];
+    const STATES = ['recording', 'processing', 'type-select', 'details', 'summarizing', 'complete'];
     let currentMeetingId = null;
     let currentTranscript = null;
     let selectedMeetingTypeId = null;
@@ -66,12 +76,17 @@ window.RecorderModule = (() => {
     function resetOverlayState() {
         stopEverything();
         audioChunks = [];
+        transcriptSegments = [];
+        pendingTranscriptions = 0;
         elapsedSeconds = 0;
         currentMeetingId = null;
         currentTranscript = null;
         selectedMeetingTypeId = null;
         isRecording = false;
         if (getEl('recording-timer')) getEl('recording-timer').textContent = '00:00';
+        if (getEl('live-transcript')) getEl('live-transcript').style.display = 'none';
+        if (getEl('live-transcript-text')) getEl('live-transcript-text').textContent = '';
+        if (getEl('transcription-status')) getEl('transcription-status').textContent = '';
         STATES.forEach(s => {
             const el = getEl(`state-${s}`);
             if (el) el.classList.remove('active');
@@ -80,7 +95,7 @@ window.RecorderModule = (() => {
     }
 
     // ---------------------------------------------------------------------------
-    // Continuous recording (no chunking)
+    // Recording with streaming transcription
     // ---------------------------------------------------------------------------
     async function startRecording() {
         if (!getEl('waveform-canvas')) return;
@@ -104,17 +119,9 @@ window.RecorderModule = (() => {
         source.connect(analyserNode);
         drawWaveform();
 
-        // Start continuous recording
+        // Start first recorder segment
         isRecording = true;
-        audioChunks = [];
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-            ? 'audio/webm;codecs=opus'
-            : 'audio/webm';
-        mediaRecorder = new MediaRecorder(stream, { mimeType });
-        mediaRecorder.ondataavailable = e => {
-            if (e.data.size > 0) audioChunks.push(e.data);
-        };
-        mediaRecorder.start(500); // collect data every 500ms
+        startRecorderSegment();
 
         // Timer
         elapsedSeconds = 0;
@@ -127,8 +134,109 @@ window.RecorderModule = (() => {
 
         showState('recording');
 
+        // Periodic chunk rotation for streaming transcription
+        chunkRotateInterval = setInterval(() => {
+            if (isRecording && mediaRecorder && mediaRecorder.state === 'recording') {
+                rotateRecorderSegment();
+            }
+        }, CHUNK_INTERVAL_MS);
+
         // Warn on page leave during recording
         window.addEventListener('beforeunload', beforeUnloadHandler);
+    }
+
+    function getMimeType() {
+        return MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus'
+            : 'audio/webm';
+    }
+
+    function startRecorderSegment() {
+        audioChunks = [];
+        const mimeType = getMimeType();
+        mediaRecorder = new MediaRecorder(stream, { mimeType });
+        mediaRecorder.ondataavailable = e => {
+            if (e.data.size > 0) audioChunks.push(e.data);
+        };
+        mediaRecorder.start(500); // collect data every 500ms for progress
+    }
+
+    function rotateRecorderSegment() {
+        if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+
+        const chunksToSend = audioChunks;
+        audioChunks = [];
+
+        mediaRecorder.onstop = () => {
+            const mimeType = mediaRecorder ? mediaRecorder.mimeType : 'audio/webm';
+            const blob = new Blob(chunksToSend, { type: mimeType });
+            sendChunkForTranscription(blob);
+
+            // Start a new segment immediately (gap is milliseconds)
+            if (isRecording && stream) {
+                startRecorderSegment();
+            }
+        };
+        mediaRecorder.stop();
+    }
+
+    async function sendChunkForTranscription(blob) {
+        if (blob.size < 500) return; // skip if too tiny
+
+        pendingTranscriptions++;
+        updateTranscriptionStatus();
+
+        const formData = new FormData();
+        formData.append('audio', blob, 'chunk.webm');
+        formData.append('format', 'webm');
+
+        try {
+            const data = await api('/api/recordings/transcribe-chunk', {
+                method: 'POST',
+                body: formData,
+            });
+            if (data.text && data.text.trim()) {
+                transcriptSegments.push(data.text.trim());
+                updateLiveTranscript();
+            }
+        } catch (err) {
+            console.error('Chunk transcription failed:', err);
+            // Non-fatal — we'll continue recording and transcribing future chunks
+        }
+
+        pendingTranscriptions--;
+        updateTranscriptionStatus();
+    }
+
+    function updateLiveTranscript() {
+        const container = getEl('live-transcript');
+        const textEl = getEl('live-transcript-text');
+        if (!container || !textEl) return;
+
+        const fullText = transcriptSegments.join(' ');
+        if (fullText) {
+            container.style.display = 'block';
+            // Show last ~300 chars so it stays readable
+            textEl.textContent = fullText.length > 300
+                ? '...' + fullText.slice(-300)
+                : fullText;
+            textEl.scrollTop = textEl.scrollHeight;
+        }
+    }
+
+    function updateTranscriptionStatus() {
+        const el = getEl('transcription-status');
+        if (!el) return;
+        if (pendingTranscriptions > 0) {
+            el.textContent = 'Transcribing...';
+            el.className = 'transcription-status active';
+        } else if (transcriptSegments.length > 0) {
+            el.textContent = `${transcriptSegments.length} segment${transcriptSegments.length > 1 ? 's' : ''} transcribed`;
+            el.className = 'transcription-status';
+        } else {
+            el.textContent = '';
+            el.className = 'transcription-status';
+        }
     }
 
     function beforeUnloadHandler(e) {
@@ -142,6 +250,10 @@ window.RecorderModule = (() => {
         if (!isRecording) return;
         isRecording = false;
 
+        // Stop the periodic rotation
+        clearInterval(chunkRotateInterval);
+        chunkRotateInterval = null;
+
         // Stop timer and visuals
         clearInterval(timerInterval);
         timerInterval = null;
@@ -150,196 +262,62 @@ window.RecorderModule = (() => {
 
         window.removeEventListener('beforeunload', beforeUnloadHandler);
 
-        showState('diarizing');
+        showState('processing');
 
-        // Stop the recorder and send the full audio for diarization
+        // Stop the current recorder and transcribe the final segment
         if (mediaRecorder && mediaRecorder.state === 'recording') {
+            const finalChunks = audioChunks;
+            audioChunks = [];
+
             mediaRecorder.onstop = async () => {
                 const mimeType = mediaRecorder ? mediaRecorder.mimeType : 'audio/webm';
-                const blob = new Blob(audioChunks, { type: mimeType });
-                audioChunks = [];
+                const blob = new Blob(finalChunks, { type: mimeType });
+
+                // Transcribe the final chunk
+                if (blob.size >= 500) {
+                    await sendChunkForTranscription(blob);
+                }
+
+                // Wait for any in-flight transcriptions to complete
+                while (pendingTranscriptions > 0) {
+                    await new Promise(r => setTimeout(r, 200));
+                }
 
                 // Clean up audio stream
                 if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
                 if (audioContext) { audioContext.close(); audioContext = null; }
 
-                await diarizeAndCreateMeeting(blob);
+                // Create the meeting with the full accumulated transcript
+                await createMeetingWithTranscript();
             };
             mediaRecorder.stop();
         } else {
-            // Recorder already stopped somehow
             if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
             if (audioContext) { audioContext.close(); audioContext = null; }
-            showToast('No audio was captured.', 'error');
-            closeOverlay();
+            createMeetingWithTranscript();
         }
     }
 
-    /**
-     * Upload a blob using XMLHttpRequest with progress tracking and retry.
-     * Returns a Promise that resolves with the parsed JSON response.
-     */
-    function uploadWithProgress(url, formData, statusEl, maxRetries = 2) {
-        return new Promise((resolve, reject) => {
-            let attempt = 0;
+    async function createMeetingWithTranscript() {
+        const fullTranscript = transcriptSegments.join('\n\n');
 
-            function tryUpload() {
-                attempt++;
-                const xhr = new XMLHttpRequest();
-                xhr.open('POST', url);
-                xhr.responseType = 'text';
-
-                // Track upload progress
-                xhr.upload.addEventListener('progress', (e) => {
-                    if (e.lengthComputable && statusEl) {
-                        const pct = Math.round((e.loaded / e.total) * 100);
-                        const mbSent = (e.loaded / (1024 * 1024)).toFixed(1);
-                        const mbTotal = (e.total / (1024 * 1024)).toFixed(1);
-                        statusEl.textContent = `Uploading: ${mbSent} / ${mbTotal} MB (${pct}%)`;
-                    }
-                });
-
-                xhr.upload.addEventListener('load', () => {
-                    if (statusEl) statusEl.textContent = 'Upload complete. Processing...';
-                });
-
-                xhr.addEventListener('load', () => {
-                    let data;
-                    try {
-                        data = JSON.parse(xhr.responseText);
-                    } catch (e) {
-                        reject(new Error(`Server returned invalid response (HTTP ${xhr.status})`));
-                        return;
-                    }
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        resolve(data);
-                    } else {
-                        reject(new Error(data.error || `Upload failed (HTTP ${xhr.status})`));
-                    }
-                });
-
-                xhr.addEventListener('error', () => {
-                    console.error(`Upload network error (attempt ${attempt}/${maxRetries + 1})`);
-                    if (attempt <= maxRetries) {
-                        if (statusEl) statusEl.textContent = `Upload failed, retrying (${attempt}/${maxRetries})...`;
-                        setTimeout(tryUpload, 2000);
-                    } else {
-                        reject(new Error('Upload failed after retries. Check your connection and try again.'));
-                    }
-                });
-
-                xhr.addEventListener('timeout', () => {
-                    console.error(`Upload timeout (attempt ${attempt}/${maxRetries + 1})`);
-                    if (attempt <= maxRetries) {
-                        if (statusEl) statusEl.textContent = `Upload timed out, retrying (${attempt}/${maxRetries})...`;
-                        setTimeout(tryUpload, 2000);
-                    } else {
-                        reject(new Error('Upload timed out after retries. The recording may be too large.'));
-                    }
-                });
-
-                // 5 minute upload timeout (generous for large files on slow connections)
-                xhr.timeout = 300000;
-                xhr.send(formData);
-            }
-
-            tryUpload();
-        });
-    }
-
-    async function diarizeAndCreateMeeting(blob) {
-        const startTime = Date.now();
-        const sizeMB = (blob.size / (1024 * 1024)).toFixed(1);
-        console.log(`Recording blob: ${sizeMB} MB, type: ${blob.type}`);
-
-        const statusEl = getEl('diarize-elapsed');
-
-        // Update elapsed time in the diarizing state
-        const progressInterval = setInterval(() => {
-            const elapsed = Math.floor((Date.now() - startTime) / 1000);
-            // Only update elapsed if not showing upload progress
-            if (statusEl && !statusEl.textContent.includes('Upload')) {
-                statusEl.textContent = `${elapsed}s elapsed`;
-            }
-        }, 1000);
+        if (!fullTranscript.trim()) {
+            showToast('No speech was detected. Please try again.', 'error');
+            closeOverlay();
+            return;
+        }
 
         try {
-            // Sanity check the blob
-            if (!blob || blob.size < 1000) {
-                throw new Error('Recording is empty or too short. Please try again.');
-            }
-
-            if (statusEl) statusEl.textContent = `Uploading ${sizeMB} MB...`;
-
-            // Step 1: Upload audio with progress tracking and retry
             const formData = new FormData();
-            formData.append('audio', blob, 'recording.webm');
-            formData.append('format', 'webm');
-
-            const submitData = await uploadWithProgress(
-                '/api/recordings/diarize', formData, statusEl
-            );
-
-            const jobId = submitData.job_id;
-            if (!jobId) {
-                throw new Error('Server did not return a job ID. Upload may have failed.');
-            }
-
-            console.log(`Diarization job started: ${jobId}`);
-            if (statusEl) statusEl.textContent = 'Transcribing & identifying speakers...';
-
-            // Step 2: Poll for result (tolerates transient network errors)
-            let transcript = null;
-            let pollErrors = 0;
-            const MAX_POLL_ERRORS = 15; // give up after 15 consecutive failures
-
-            while (true) {
-                await new Promise(r => setTimeout(r, 3000));
-
-                let status;
-                try {
-                    status = await api(`/api/recordings/diarize-status/${jobId}`);
-                    pollErrors = 0; // reset on success
-                } catch (pollErr) {
-                    pollErrors++;
-                    console.warn(`Poll error ${pollErrors}/${MAX_POLL_ERRORS}:`, pollErr.message);
-                    if (statusEl) statusEl.textContent = `Connection issue (retry ${pollErrors}/${MAX_POLL_ERRORS})...`;
-                    if (pollErrors >= MAX_POLL_ERRORS) {
-                        throw new Error('Lost connection to server. Your recording may still be processing — check your meetings list.');
-                    }
-                    continue; // retry on next interval
-                }
-
-                if (status.status === 'complete') {
-                    transcript = status.transcript;
-                    break;
-                } else if (status.status === 'error') {
-                    throw new Error(status.error || 'Diarization failed');
-                }
-                // else still processing, continue polling
-                const elapsed = Math.floor((Date.now() - startTime) / 1000);
-                if (statusEl) statusEl.textContent = `${elapsed}s elapsed — still processing...`;
-            }
-
-            clearInterval(progressInterval);
-
-            if (!transcript || !transcript.trim()) {
-                showToast('No speech was detected. Please try again.', 'error');
-                closeOverlay();
-                return;
-            }
-
-            // Step 3: Create meeting with the diarized transcript
-            currentTranscript = transcript;
-            const meetingForm = new FormData();
-            meetingForm.append('transcript', transcript);
+            formData.append('transcript', fullTranscript);
 
             const data = await api('/api/recordings/upload', {
                 method: 'POST',
-                body: meetingForm,
+                body: formData,
             });
 
             currentMeetingId = data.meeting_id;
+            currentTranscript = data.transcript;
             if (getEl('meeting-title-input')) getEl('meeting-title-input').value = '';
 
             // Show the new meeting in the list right away
@@ -350,17 +328,16 @@ window.RecorderModule = (() => {
             await loadMeetingTypes();
             showTranscriptPreview(currentTranscript);
             showState('type-select');
-
         } catch (err) {
-            clearInterval(progressInterval);
-            console.error('Diarization pipeline failed:', err);
-            showToast(`Transcription failed: ${err.message}`, 'error');
+            showToast(`Failed to save meeting: ${err.message}`, 'error');
             closeOverlay();
         }
     }
 
     function stopEverything() {
         isRecording = false;
+        clearInterval(chunkRotateInterval);
+        chunkRotateInterval = null;
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
             mediaRecorder.onstop = null; // prevent trigger
             mediaRecorder.stop();

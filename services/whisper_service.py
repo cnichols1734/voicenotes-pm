@@ -25,9 +25,6 @@ WHISPER_MAX_BYTES = 24 * 1024 * 1024  # 24 MB
 # Timeout for local Whisper requests (seconds)
 LOCAL_WHISPER_TIMEOUT = 120
 
-# Timeout for full-audio diarization (long meetings can take several minutes)
-DIARIZE_TIMEOUT = 600  # 10 minutes
-
 
 class NamedBytesIO(io.BytesIO):
     """BytesIO subclass that carries a filename attribute for the OpenAI SDK."""
@@ -79,14 +76,11 @@ def _convert_to_wav(audio_bytes: bytes, file_format: str) -> bytes:
             os.unlink(tmp_out_path)
 
 
-def _transcribe_local(audio_bytes: bytes, file_format: str, use_diarization: bool = True) -> str:
+def _transcribe_local(audio_bytes: bytes, file_format: str) -> str:
     """
     Transcribe audio using a local whisper.cpp server.
     Converts to WAV first (whisper.cpp needs WAV format).
-
-    If use_diarization is True, sends to /diarize endpoint which returns
-    speaker-labeled transcripts (e.g. "Speaker 1: Hello"). Falls back to
-    /inference if /diarize fails.
+    Uses plain /inference endpoint (no diarization).
     """
     # Convert to WAV — whisper.cpp can't decode webm/opus natively
     wav_bytes = _convert_to_wav(audio_bytes, file_format)
@@ -95,29 +89,9 @@ def _transcribe_local(audio_bytes: bytes, file_format: str, use_diarization: boo
     files = {
         "file": ("audio.wav", wav_bytes, "audio/wav"),
     }
-
-    # Try diarization endpoint first for speaker-labeled transcription
-    if use_diarization:
-        try:
-            response = requests.post(
-                f"{base_url}/diarize",
-                files=files,
-                timeout=LOCAL_WHISPER_TIMEOUT,
-            )
-            response.raise_for_status()
-            result = response.json()
-            text = result.get("text", "").strip()
-            if text:
-                logger.info("Local diarize returned: '%s'", text[:100])
-                return text
-        except Exception as exc:
-            logger.warning("Diarize endpoint failed (%s), falling back to /inference", exc)
-            # Re-create files dict since requests consumes the BytesIO
-            files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
-
-    # Fallback: plain transcription without speaker labels
     data = {
         "response_format": "json",
+        "no_context": "true",  # prevent hallucination loops
     }
 
     response = requests.post(
@@ -200,85 +174,3 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> str:
 
     return "\n\n".join(transcripts)
 
-
-def diarize_audio(
-    audio_bytes: bytes,
-    file_format: str = "webm",
-    min_speakers: int = None,
-    max_speakers: int = None,
-) -> str:
-    """
-    Diarize + transcribe audio using the local whisper-monitor /diarize endpoint.
-
-    Sends the full recording at once for accurate cross-meeting speaker identification.
-    Returns a speaker-labeled transcript (e.g. "Speaker 1: ... \\n\\nSpeaker 2: ...").
-
-    No fallback to OpenAI — diarization requires the local pyannote service.
-    """
-    if len(audio_bytes) < 500:
-        return ""
-
-    if not Config.WHISPER_BASE_URL:
-        raise RuntimeError("WHISPER_BASE_URL not configured; diarization requires local service")
-
-    wav_bytes = _convert_to_wav(audio_bytes, file_format)
-    base_url = Config.WHISPER_BASE_URL.rstrip("/")
-
-    size_mb = len(wav_bytes) / (1024 * 1024)
-    logger.info("Sending %.1f MB to /diarize (timeout=%ds)...", size_mb, DIARIZE_TIMEOUT)
-    start = time.time()
-
-    # Step 1: Submit audio for async diarization on Mac
-    files = {"file": ("audio.wav", wav_bytes, "audio/wav")}
-    data = {}
-    if min_speakers is not None:
-        data["min_speakers"] = str(min_speakers)
-    if max_speakers is not None:
-        data["max_speakers"] = str(max_speakers)
-
-    response = requests.post(
-        f"{base_url}/diarize",
-        files=files,
-        data=data,
-        timeout=60,  # Upload should complete quickly
-    )
-    response.raise_for_status()
-    result = response.json()
-
-    # Check if Mac returned a job_id (async) or direct text (legacy sync)
-    if "job_id" in result:
-        # Step 2: Poll Mac for diarization result
-        job_id = result["job_id"]
-        logger.info("Diarize job submitted to Mac: %s", job_id)
-
-        poll_interval = 3  # seconds
-        while True:
-            time.sleep(poll_interval)
-            elapsed = time.time() - start
-            if elapsed > DIARIZE_TIMEOUT:
-                raise RuntimeError(f"Diarization timed out after {int(elapsed)}s")
-
-            status_resp = requests.get(
-                f"{base_url}/diarize-status/{job_id}",
-                timeout=30,
-            )
-            status_resp.raise_for_status()
-            status_data = status_resp.json()
-
-            if status_data.get("status") == "complete":
-                text = status_data.get("text", "").strip()
-                break
-            elif status_data.get("status") == "error":
-                raise RuntimeError(f"Mac diarization failed: {status_data.get('error', 'unknown')}")
-            # else still processing, continue polling
-    else:
-        # Legacy: direct text response
-        text = result.get("text", "").strip()
-
-    elapsed = time.time() - start
-    logger.info("Diarization completed in %.1fs, transcript length: %d chars", elapsed, len(text))
-
-    if not text:
-        raise RuntimeError("Diarization returned empty transcript")
-
-    return text

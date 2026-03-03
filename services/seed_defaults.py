@@ -16,6 +16,8 @@ MEETING_TYPE_DEFAULTS = [
         "sort_order": 0,
         "prompt_template": """You are an expert meeting analyst for a Technical Product Manager. You are analyzing the transcript of an Engineering Kickoff meeting where the PM is discussing a new feature or project with the engineering team.
 
+IMPORTANT: This transcript does not have speaker labels. Use conversational context, role-specific language, and dialogue flow to infer who is speaking (e.g. the PM vs engineers). Attribute action items and decisions to the correct person based on context clues like job title references, question/answer patterns, and domain expertise.
+
 Focus on:
 - Technical decisions made about architecture, approach, or implementation
 - Questions engineers raised that need answers (these are likely action items for the PM)
@@ -61,6 +63,8 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
         "is_default": True,
         "sort_order": 1,
         "prompt_template": """You are an expert meeting analyst for a Technical Product Manager. You are analyzing the transcript of a Stakeholder Problem-Solving meeting where the PM and stakeholders are diagnosing an issue, discussing root causes, and working toward solutions.
+
+IMPORTANT: This transcript does not have speaker labels. Use conversational context, role-specific language, and dialogue flow to infer who is speaking and attribute proposals, concerns, and decisions to the right people.
 
 Focus on:
 - The problem or issue being discussed (clearly define it)
@@ -109,6 +113,8 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
         "is_default": True,
         "sort_order": 2,
         "prompt_template": """You are an expert meeting analyst for a Technical Product Manager. You are analyzing the transcript of a 1:1 meeting between the PM and their boss (Head of Product or direct manager).
+
+IMPORTANT: This transcript does not have speaker labels. Use conversational context to distinguish the PM from the boss — the boss typically gives directives, asks for updates, and provides strategic context, while the PM reports status and receives tasks.
 
 Focus on:
 - Directives or priorities communicated by the boss
@@ -160,6 +166,8 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
         "sort_order": 3,
         "prompt_template": """You are an expert meeting analyst for a Technical Product Manager. You are analyzing the transcript of a Strategy Planning meeting where the PM and stakeholders are discussing long-term goals, roadmaps, and strategic initiatives.
 
+IMPORTANT: This transcript does not have speaker labels. Use conversational context and role-specific language to infer who is speaking and attribute strategic proposals, decisions, and concerns to the right people.
+
 Focus on:
 - Strategic objectives and goals discussed
 - Roadmap items or initiatives prioritized
@@ -206,6 +214,8 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
         "is_default": True,
         "sort_order": 4,
         "prompt_template": """You are an expert meeting analyst for a Technical Product Manager. You are analyzing the transcript of a Sprint Planning or Standup meeting with the development team.
+
+IMPORTANT: This transcript does not have speaker labels. Use conversational context to distinguish the PM from developers — developers discuss technical tasks, blockers, and estimates while the PM discusses priorities and requirements. Attribute blockers and tasks to the right people.
 
 Focus on:
 - Stories or tickets discussed and their status
@@ -256,6 +266,8 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
         "is_default": True,
         "sort_order": 5,
         "prompt_template": """You are an expert meeting analyst for a Technical Product Manager. You are analyzing a meeting transcript. This is a general meeting that may cover various topics.
+
+IMPORTANT: This transcript does not have speaker labels. Use conversational context, dialogue patterns, and role references to infer who is speaking. Attribute action items and decisions to specific people when possible based on context clues.
 
 Provide a comprehensive, well-organized summary. Focus on:
 - What was the purpose and context of this meeting?

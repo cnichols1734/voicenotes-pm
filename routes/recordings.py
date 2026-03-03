@@ -1,20 +1,14 @@
 """
 VoiceNotes PM - Recordings CRUD + upload/transcribe/summarize routes.
 """
-import json
 import logging
-import os
-import tempfile
-import threading
-import uuid
 from datetime import datetime
-from pathlib import Path
 
 from flask import Blueprint, jsonify, request
 from flask_login import login_required, current_user
 
 from services.supabase_client import get_supabase
-from services.whisper_service import transcribe_audio, diarize_audio
+from services.whisper_service import transcribe_audio
 from services.summarizer_service import summarize_transcript
 from services.title_service import generate_title
 
@@ -23,40 +17,6 @@ logger = logging.getLogger(__name__)
 recordings_bp = Blueprint("recordings", __name__, url_prefix="/api/recordings")
 
 MAX_AUDIO_BYTES = 100 * 1024 * 1024  # 100 MB hard limit
-
-# File-based job store (works across multiple gunicorn workers)
-_JOBS_DIR = Path(tempfile.gettempdir()) / "voicenotes-diarize-jobs"
-_JOBS_DIR.mkdir(exist_ok=True)
-
-
-def _job_path(job_id: str) -> Path:
-    """Get the file path for a diarization job."""
-    return _JOBS_DIR / f"{job_id}.json"
-
-
-def _write_job(job_id: str, data: dict):
-    """Write job state to a file (atomic via temp + rename)."""
-    path = _job_path(job_id)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data))
-    tmp.rename(path)
-
-
-def _read_job(job_id: str) -> dict | None:
-    """Read job state from file, or None if not found."""
-    path = _job_path(job_id)
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-def _delete_job(job_id: str):
-    """Clean up job file."""
-    path = _job_path(job_id)
-    path.unlink(missing_ok=True)
 
 
 def _supabase_error(message, status=503):
@@ -148,75 +108,6 @@ def transcribe_chunk():
         return jsonify({"error": "Transcription failed", "detail": str(exc)}), 502
 
     return jsonify({"text": transcript})
-
-
-# ---------------------------------------------------------------------------
-# POST /api/recordings/diarize  (async job submission)
-# ---------------------------------------------------------------------------
-@recordings_bp.route("/diarize", methods=["POST"])
-@login_required
-def submit_diarize():
-    """
-    Accept full audio recording, start background diarization + transcription.
-    Returns a job_id immediately for polling via /diarize-status/<job_id>.
-    """
-    if "audio" not in request.files:
-        return jsonify({"error": "No audio file provided"}), 400
-
-    audio_file = request.files["audio"]
-    audio_bytes = audio_file.read()
-
-    if len(audio_bytes) < 1000:
-        return jsonify({"error": "Recording too short"}), 400
-
-    if len(audio_bytes) > MAX_AUDIO_BYTES:
-        return jsonify({"error": "Audio file exceeds 100 MB limit"}), 413
-
-    file_format = request.form.get("format", "webm")
-    min_speakers = request.form.get("min_speakers", type=int)
-    max_speakers = request.form.get("max_speakers", type=int)
-
-    job_id = str(uuid.uuid4())
-    _write_job(job_id, {"status": "processing", "transcript": None, "error": None})
-
-    def run_diarization():
-        try:
-            transcript = diarize_audio(
-                audio_bytes, file_format,
-                min_speakers=min_speakers,
-                max_speakers=max_speakers,
-            )
-            _write_job(job_id, {"status": "complete", "transcript": transcript, "error": None})
-        except Exception as exc:
-            logger.error("Diarization job %s failed: %s", job_id, exc)
-            _write_job(job_id, {"status": "error", "transcript": None, "error": str(exc)})
-
-    thread = threading.Thread(target=run_diarization, daemon=True)
-    thread.start()
-
-    logger.info("Diarization job %s started (%.1f MB audio)", job_id, len(audio_bytes) / (1024 * 1024))
-    return jsonify({"job_id": job_id})
-
-
-# ---------------------------------------------------------------------------
-# GET /api/recordings/diarize-status/<job_id>
-# ---------------------------------------------------------------------------
-@recordings_bp.route("/diarize-status/<job_id>", methods=["GET"])
-@login_required
-def diarize_status(job_id):
-    """Poll for diarization job result."""
-    job = _read_job(job_id)
-    if not job:
-        return jsonify({"error": "Job not found"}), 404
-
-    if job["status"] == "complete":
-        _delete_job(job_id)
-        return jsonify({"status": "complete", "transcript": job["transcript"]})
-    elif job["status"] == "error":
-        _delete_job(job_id)
-        return jsonify({"status": "error", "error": job["error"]}), 502
-    else:
-        return jsonify({"status": "processing"})
 
 
 # ---------------------------------------------------------------------------
