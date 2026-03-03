@@ -1,11 +1,18 @@
 """
-VoiceNotes PM - OpenRouter summarization service.
-Sends a transcript to OpenRouter and returns a structured summary dict.
+VoiceNotes PM - Summarization service.
+
+Supports two backends:
+  1. Local LLM (via LM Studio) — tried first if LLM_BASE_URL is set
+  2. OpenRouter API — used as fallback, or as primary if no local URL configured
+
+Both backends use the OpenAI chat completions format.
 """
 import json
 import logging
 import re
+import time
 
+import openai
 import requests
 
 from config import Config
@@ -51,17 +58,45 @@ def _extract_json(text: str) -> dict:
     return None
 
 
-def summarize_transcript(transcript: str, prompt_template: str) -> dict:
-    """
-    Summarize a meeting transcript using OpenRouter API.
-
-    Injects the transcript into prompt_template via the {transcript} placeholder,
-    sends it to the configured model, and returns a structured summary dict.
-
-    If parsing fails, returns a fallback dict with the raw text in executive_summary.
-    """
+def _build_messages(transcript: str, prompt_template: str) -> list:
+    """Build the chat messages for summarization."""
     system_content = prompt_template.replace("{transcript}", transcript)
+    return [
+        {"role": "system", "content": system_content},
+        {
+            "role": "user",
+            "content": (
+                "Analyze this meeting transcript and provide the structured summary as specified."
+            ),
+        },
+    ]
 
+
+def _summarize_local(messages: list) -> str:
+    """
+    Summarize using local LM Studio (OpenAI-compatible API).
+    Returns the raw response text.
+    """
+    client = openai.OpenAI(
+        api_key="lm-studio",
+        base_url=Config.LLM_BASE_URL,
+        timeout=300,  # local models can be slower
+    )
+
+    response = client.chat.completions.create(
+        model=Config.LLM_MODEL,
+        messages=messages,
+        temperature=0.3,
+    )
+
+    return response.choices[0].message.content
+
+
+def _summarize_openrouter(messages: list) -> str:
+    """
+    Summarize using OpenRouter API.
+    Returns the raw response text.
+    """
     headers = {
         "Authorization": f"Bearer {Config.OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
@@ -71,38 +106,65 @@ def summarize_transcript(transcript: str, prompt_template: str) -> dict:
 
     payload = {
         "model": Config.OPENROUTER_MODEL,
-        "messages": [
-            {"role": "system", "content": system_content},
-            {
-                "role": "user",
-                "content": (
-                    "Analyze this meeting transcript and provide the structured summary as specified."
-                ),
-            },
-        ],
+        "messages": messages,
         "temperature": 0.3,
     }
 
-    try:
-        response = requests.post(
-            OPENROUTER_ENDPOINT,
-            headers=headers,
-            json=payload,
-            timeout=120,
-        )
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise RuntimeError(
-            f"OpenRouter API request failed: {exc}. "
-            "If the free model is unavailable, try updating OPENROUTER_MODEL in settings."
-        ) from exc
+    response = requests.post(
+        OPENROUTER_ENDPOINT,
+        headers=headers,
+        json=payload,
+        timeout=120,
+    )
+    response.raise_for_status()
 
-    raw_content = response.json()["choices"][0]["message"]["content"]
-    logger.debug("OpenRouter raw response: %s", raw_content[:500])
+    return response.json()["choices"][0]["message"]["content"]
+
+
+def summarize_transcript(transcript: str, prompt_template: str) -> dict:
+    """
+    Summarize a meeting transcript.
+
+    Strategy:
+      1. If LLM_BASE_URL is configured, try local LM Studio (Qwen) first.
+      2. If local fails, fall back to OpenRouter (Minimax).
+      3. If no local URL, go straight to OpenRouter.
+
+    Returns a structured summary dict.
+    """
+    messages = _build_messages(transcript, prompt_template)
+    raw_content = None
+
+    # --- Try local LLM first ---
+    if Config.LLM_BASE_URL:
+        try:
+            logger.info("Trying local LLM (%s) at %s...", Config.LLM_MODEL, Config.LLM_BASE_URL)
+            start = time.time()
+            raw_content = _summarize_local(messages)
+            elapsed = time.time() - start
+            logger.info("Local LLM succeeded in %.1fs.", elapsed)
+        except Exception as exc:
+            logger.warning("Local LLM failed: %s. Falling back to OpenRouter.", exc)
+            raw_content = None
+
+    # --- Fallback: OpenRouter ---
+    if raw_content is None:
+        try:
+            logger.info("Using OpenRouter (%s)...", Config.OPENROUTER_MODEL)
+            start = time.time()
+            raw_content = _summarize_openrouter(messages)
+            elapsed = time.time() - start
+            logger.info("OpenRouter succeeded in %.1fs.", elapsed)
+        except requests.RequestException as exc:
+            raise RuntimeError(
+                f"OpenRouter API request failed: {exc}. "
+                "If the free model is unavailable, try updating OPENROUTER_MODEL in settings."
+            ) from exc
+
+    logger.debug("LLM raw response: %s", raw_content[:500] if raw_content else "(empty)")
 
     parsed = _extract_json(raw_content)
     if parsed is not None:
-        # Ensure required keys exist
         result = {**FALLBACK_SUMMARY, **parsed}
         result["raw_transcript_available"] = True
         return result
