@@ -175,33 +175,123 @@ window.RecorderModule = (() => {
         }
     }
 
+    /**
+     * Upload a blob using XMLHttpRequest with progress tracking and retry.
+     * Returns a Promise that resolves with the parsed JSON response.
+     */
+    function uploadWithProgress(url, formData, statusEl, maxRetries = 2) {
+        return new Promise((resolve, reject) => {
+            let attempt = 0;
+
+            function tryUpload() {
+                attempt++;
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', url);
+                xhr.responseType = 'text';
+
+                // Track upload progress
+                xhr.upload.addEventListener('progress', (e) => {
+                    if (e.lengthComputable && statusEl) {
+                        const pct = Math.round((e.loaded / e.total) * 100);
+                        const mbSent = (e.loaded / (1024 * 1024)).toFixed(1);
+                        const mbTotal = (e.total / (1024 * 1024)).toFixed(1);
+                        statusEl.textContent = `Uploading: ${mbSent} / ${mbTotal} MB (${pct}%)`;
+                    }
+                });
+
+                xhr.upload.addEventListener('load', () => {
+                    if (statusEl) statusEl.textContent = 'Upload complete. Processing...';
+                });
+
+                xhr.addEventListener('load', () => {
+                    let data;
+                    try {
+                        data = JSON.parse(xhr.responseText);
+                    } catch (e) {
+                        reject(new Error(`Server returned invalid response (HTTP ${xhr.status})`));
+                        return;
+                    }
+                    if (xhr.status >= 200 && xhr.status < 300) {
+                        resolve(data);
+                    } else {
+                        reject(new Error(data.error || `Upload failed (HTTP ${xhr.status})`));
+                    }
+                });
+
+                xhr.addEventListener('error', () => {
+                    console.error(`Upload network error (attempt ${attempt}/${maxRetries + 1})`);
+                    if (attempt <= maxRetries) {
+                        if (statusEl) statusEl.textContent = `Upload failed, retrying (${attempt}/${maxRetries})...`;
+                        setTimeout(tryUpload, 2000);
+                    } else {
+                        reject(new Error('Upload failed after retries. Check your connection and try again.'));
+                    }
+                });
+
+                xhr.addEventListener('timeout', () => {
+                    console.error(`Upload timeout (attempt ${attempt}/${maxRetries + 1})`);
+                    if (attempt <= maxRetries) {
+                        if (statusEl) statusEl.textContent = `Upload timed out, retrying (${attempt}/${maxRetries})...`;
+                        setTimeout(tryUpload, 2000);
+                    } else {
+                        reject(new Error('Upload timed out after retries. The recording may be too large.'));
+                    }
+                });
+
+                // 5 minute upload timeout (generous for large files on slow connections)
+                xhr.timeout = 300000;
+                xhr.send(formData);
+            }
+
+            tryUpload();
+        });
+    }
+
     async function diarizeAndCreateMeeting(blob) {
         const startTime = Date.now();
+        const sizeMB = (blob.size / (1024 * 1024)).toFixed(1);
+        console.log(`Recording blob: ${sizeMB} MB, type: ${blob.type}`);
+
+        const statusEl = getEl('diarize-elapsed');
 
         // Update elapsed time in the diarizing state
         const progressInterval = setInterval(() => {
             const elapsed = Math.floor((Date.now() - startTime) / 1000);
-            const el = getEl('diarize-elapsed');
-            if (el) el.textContent = `${elapsed}s elapsed`;
+            // Only update elapsed if not showing upload progress
+            if (statusEl && !statusEl.textContent.includes('Upload')) {
+                statusEl.textContent = `${elapsed}s elapsed`;
+            }
         }, 1000);
 
         try {
-            // Step 1: Submit audio for diarization
+            // Sanity check the blob
+            if (!blob || blob.size < 1000) {
+                throw new Error('Recording is empty or too short. Please try again.');
+            }
+
+            if (statusEl) statusEl.textContent = `Uploading ${sizeMB} MB...`;
+
+            // Step 1: Upload audio with progress tracking and retry
             const formData = new FormData();
             formData.append('audio', blob, 'recording.webm');
             formData.append('format', 'webm');
 
-            const submitData = await api('/api/recordings/diarize', {
-                method: 'POST',
-                body: formData,
-            });
+            const submitData = await uploadWithProgress(
+                '/api/recordings/diarize', formData, statusEl
+            );
 
             const jobId = submitData.job_id;
+            if (!jobId) {
+                throw new Error('Server did not return a job ID. Upload may have failed.');
+            }
+
+            console.log(`Diarization job started: ${jobId}`);
+            if (statusEl) statusEl.textContent = 'Transcribing & identifying speakers...';
 
             // Step 2: Poll for result (tolerates transient network errors)
             let transcript = null;
             let pollErrors = 0;
-            const MAX_POLL_ERRORS = 10; // give up after 10 consecutive failures
+            const MAX_POLL_ERRORS = 15; // give up after 15 consecutive failures
 
             while (true) {
                 await new Promise(r => setTimeout(r, 3000));
@@ -213,6 +303,7 @@ window.RecorderModule = (() => {
                 } catch (pollErr) {
                     pollErrors++;
                     console.warn(`Poll error ${pollErrors}/${MAX_POLL_ERRORS}:`, pollErr.message);
+                    if (statusEl) statusEl.textContent = `Connection issue (retry ${pollErrors}/${MAX_POLL_ERRORS})...`;
                     if (pollErrors >= MAX_POLL_ERRORS) {
                         throw new Error('Lost connection to server. Your recording may still be processing — check your meetings list.');
                     }
@@ -226,6 +317,8 @@ window.RecorderModule = (() => {
                     throw new Error(status.error || 'Diarization failed');
                 }
                 // else still processing, continue polling
+                const elapsed = Math.floor((Date.now() - startTime) / 1000);
+                if (statusEl) statusEl.textContent = `${elapsed}s elapsed — still processing...`;
             }
 
             clearInterval(progressInterval);
@@ -260,6 +353,7 @@ window.RecorderModule = (() => {
 
         } catch (err) {
             clearInterval(progressInterval);
+            console.error('Diarization pipeline failed:', err);
             showToast(`Transcription failed: ${err.message}`, 'error');
             closeOverlay();
         }
