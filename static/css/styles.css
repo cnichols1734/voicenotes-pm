@@ -515,8 +515,6 @@ select {
 
 .meeting-card:hover {
   border-color: var(--border-default);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
 }
 
 .meeting-card-header {
