@@ -146,19 +146,9 @@ window.MeetingsModule = (() => {
             </button>
           </div>`;
 
-        // Navigate to detail on body click
-        card.querySelector('.meeting-card-body').addEventListener('click', () => {
-            // If THIS card is swiped open, close it instead of navigating
-            if (wrapper.classList.contains('swipe-open')) {
-                snapSwipeClose(wrapper, card);
-                return;
-            }
-            // If a DIFFERENT card is open, close it and still navigate this one
-            if (openSwipeRow) {
-                snapSwipeClose(openSwipeRow, openSwipeRow.querySelector('.meeting-card'));
-            }
-            window.location.href = `/meeting/${meeting.id}`;
-        });
+        // Navigate to detail — unified touch + mouse handler
+        const body = card.querySelector('.meeting-card-body');
+        addTapHandler(body, wrapper, card, `/meeting/${meeting.id}`);
 
         // Move-to-folder button
         card.querySelector('.card-move-btn').addEventListener('click', (e) => {
@@ -184,6 +174,50 @@ window.MeetingsModule = (() => {
         wrapper.appendChild(deleteBg);
         wrapper.appendChild(card);
         return wrapper;
+    }
+
+    // ── Tap handler (bypasses iOS sticky-hover / double-tap issue) ─────────
+    function addTapHandler(el, wrapper, card, href) {
+        let tapStartX = 0, tapStartY = 0, tapStartTime = 0;
+
+        el.addEventListener('touchstart', (e) => {
+            tapStartX = e.touches[0].clientX;
+            tapStartY = e.touches[0].clientY;
+            tapStartTime = Date.now();
+        }, { passive: true });
+
+        el.addEventListener('touchend', (e) => {
+            const dx = e.changedTouches[0].clientX - tapStartX;
+            const dy = e.changedTouches[0].clientY - tapStartY;
+            const elapsed = Date.now() - tapStartTime;
+
+            // Only count as a tap: <300ms, <10px movement
+            if (elapsed > 300 || Math.abs(dx) > 10 || Math.abs(dy) > 10) return;
+
+            e.preventDefault(); // prevent the synthetic click / iOS hover dance
+
+            if (wrapper.classList.contains('swipe-open')) {
+                snapSwipeClose(wrapper, card);
+                return;
+            }
+            if (openSwipeRow) {
+                snapSwipeClose(openSwipeRow, openSwipeRow.querySelector('.meeting-card'));
+            }
+            window.location.href = href;
+        });
+
+        // Keep mouse click for desktop
+        el.addEventListener('click', (e) => {
+            if (wrapper.classList.contains('swipe-open')) {
+                snapSwipeClose(wrapper, card);
+                e.preventDefault();
+                return;
+            }
+            if (openSwipeRow) {
+                snapSwipeClose(openSwipeRow, openSwipeRow.querySelector('.meeting-card'));
+            }
+            window.location.href = href;
+        });
     }
 
     // ── Swipe-to-delete helpers ──────────────────────────────────────────────
