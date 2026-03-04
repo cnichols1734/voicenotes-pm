@@ -106,7 +106,7 @@ def post_chat(meeting_id):
 
     return Response(
         stream_with_context(generate()),
-        mimetype="text/event-stream",
+        content_type="text/event-stream; charset=utf-8",
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",

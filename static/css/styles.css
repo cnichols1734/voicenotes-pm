@@ -2622,7 +2622,7 @@ select {
   display: flex;
   flex-direction: column;
   height: calc(100vh - 340px);
-  min-height: 400px;
+  max-height: 520px;
   background: var(--bg-primary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -2930,8 +2930,9 @@ select {
 /* Mobile adjustments for chat */
 @media (max-width: 768px) {
   .chat-container {
-    height: calc(100vh - 300px);
-    min-height: 350px;
+    height: calc(100dvh - 380px);
+    max-height: 360px;
+    min-height: 260px;
     border-radius: var(--radius-sm);
   }
 
