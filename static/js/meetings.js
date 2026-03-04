@@ -148,9 +148,14 @@ window.MeetingsModule = (() => {
 
         // Navigate to detail on body click
         card.querySelector('.meeting-card-body').addEventListener('click', () => {
+            // If THIS card is swiped open, close it instead of navigating
             if (wrapper.classList.contains('swipe-open')) {
                 snapSwipeClose(wrapper, card);
                 return;
+            }
+            // If a DIFFERENT card is open, close it and still navigate this one
+            if (openSwipeRow) {
+                snapSwipeClose(openSwipeRow, openSwipeRow.querySelector('.meeting-card'));
             }
             window.location.href = `/meeting/${meeting.id}`;
         });
@@ -187,33 +192,38 @@ window.MeetingsModule = (() => {
 
     function addSwipeHandler(wrapper, card, meetingId) {
         let startX = 0, startY = 0, currentDx = 0;
-        let isTracking = false, isHorizontal = null;
+        let didSwipe = false;   // true only once horizontal movement exceeds dead zone
+        let decided = false;    // true once we know if gesture is horizontal or vertical
 
         card.addEventListener('touchstart', (e) => {
-            // Close any other open row first
-            if (openSwipeRow && openSwipeRow !== wrapper) {
-                snapSwipeClose(openSwipeRow, openSwipeRow.querySelector('.meeting-card'));
-            }
             startX = e.touches[0].clientX;
             startY = e.touches[0].clientY;
             currentDx = 0;
-            isTracking = true;
-            isHorizontal = null;
-            wrapper.classList.add('is-swiping');
+            didSwipe = false;
+            decided = false;
         }, { passive: true });
 
         card.addEventListener('touchmove', (e) => {
-            if (!isTracking) return;
             const dx = e.touches[0].clientX - startX;
             const dy = e.touches[0].clientY - startY;
 
-            if (isHorizontal === null && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
-                isHorizontal = Math.abs(dx) > Math.abs(dy);
+            // Wait until finger moves enough to decide direction
+            if (!decided) {
+                if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+                decided = true;
+                if (Math.abs(dy) >= Math.abs(dx)) return; // vertical scroll — bail out
+                // Horizontal: close any other open row and start tracking
+                if (openSwipeRow && openSwipeRow !== wrapper) {
+                    snapSwipeClose(openSwipeRow, openSwipeRow.querySelector('.meeting-card'));
+                }
+                didSwipe = true;
+                wrapper.classList.add('is-swiping');
             }
-            if (!isHorizontal) return;
 
-            e.preventDefault(); // prevent scroll while swiping horizontally
-            currentDx = Math.min(0, dx); // left swipe only
+            if (!didSwipe) return;
+
+            e.preventDefault();
+            currentDx = Math.min(0, dx);
             card.style.transform = `translateX(${currentDx}px)`;
 
             if (Math.abs(currentDx) >= SWIPE_REVEAL) {
@@ -225,17 +235,17 @@ window.MeetingsModule = (() => {
         }, { passive: false });
 
         card.addEventListener('touchend', () => {
-            isTracking = false;
             wrapper.classList.remove('is-swiping');
 
+            // Pure tap (no horizontal swipe) — do nothing, let click handler navigate
+            if (!didSwipe) return;
+
             if (Math.abs(currentDx) >= SWIPE_COMMIT) {
-                // Far enough — snap open and confirm before deleting
                 card.style.transform = `translateX(-${SWIPE_REVEAL}px)`;
                 wrapper.classList.add('swipe-open');
                 openSwipeRow = wrapper;
                 confirmDeleteMeeting(meetingId, wrapper);
             } else if (Math.abs(currentDx) >= SWIPE_REVEAL) {
-                // Snap open to reveal Delete button
                 card.style.transform = `translateX(-${SWIPE_REVEAL}px)`;
                 wrapper.classList.add('swipe-open');
                 openSwipeRow = wrapper;
