@@ -229,8 +229,11 @@ window.MeetingsModule = (() => {
             wrapper.classList.remove('is-swiping');
 
             if (Math.abs(currentDx) >= SWIPE_COMMIT) {
-                // Far enough — delete immediately (no confirm)
-                executeDeleteMeeting(meetingId, wrapper);
+                // Far enough — snap open and confirm before deleting
+                card.style.transform = `translateX(-${SWIPE_REVEAL}px)`;
+                wrapper.classList.add('swipe-open');
+                openSwipeRow = wrapper;
+                confirmDeleteMeeting(meetingId, wrapper);
             } else if (Math.abs(currentDx) >= SWIPE_REVEAL) {
                 // Snap open to reveal Delete button
                 card.style.transform = `translateX(-${SWIPE_REVEAL}px)`;
