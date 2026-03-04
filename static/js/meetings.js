@@ -779,6 +779,16 @@ window.MeetingsModule = (() => {
                 btn.classList.add('active');
                 const panel = getEl(`tab-${btn.dataset.tab}`);
                 if (panel) panel.classList.add('active');
+
+                // Auto-scroll so the chat input is visible on mobile
+                if (btn.dataset.tab === 'chat') {
+                    const chatInput = getEl('chat-input');
+                    if (chatInput) {
+                        setTimeout(() => {
+                            chatInput.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }, 100);
+                    }
+                }
             });
         });
 
