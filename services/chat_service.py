@@ -112,6 +112,7 @@ def stream_chat_response(meeting: dict, chat_history: list, user_message: str):
     except requests.RequestException as exc:
         raise RuntimeError(f"OpenRouter API request failed: {exc}") from exc
 
+    response.encoding = "utf-8"
     for line in response.iter_lines(decode_unicode=True):
         if not line or not line.startswith("data: "):
             continue
