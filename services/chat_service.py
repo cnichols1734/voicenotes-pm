@@ -157,22 +157,28 @@ def stream_chat_response(meeting: dict, chat_history: list, user_message: str):
     """
     Generator that yields text chunks from the chat model.
 
-    Strategy (same as summarizer):
-      1. If LLM_BASE_URL is configured, try local LM Studio first.
-      2. If local fails (or not configured), fall back to OpenRouter.
+    Strategy:
+      1. Try OpenRouter first (handles large context better).
+      2. If OpenRouter fails and LLM_BASE_URL is configured, fall back to local LLM.
     """
     messages = build_messages(meeting, chat_history, user_message)
 
+    try:
+        logger.info("Chat: using OpenRouter (%s)...", Config.OPENROUTER_MODEL)
+        yield from _stream_openrouter(messages)
+        return
+    except Exception as exc:
+        logger.warning("Chat: OpenRouter failed: %s.", exc)
+
     if Config.LLM_BASE_URL:
         try:
-            logger.info("Chat: trying local LLM (%s) at %s...", Config.LLM_MODEL, Config.LLM_BASE_URL)
+            logger.info("Chat: falling back to local LLM (%s) at %s...", Config.LLM_MODEL, Config.LLM_BASE_URL)
             yield from _stream_local(messages)
             return
         except Exception as exc:
-            logger.warning("Chat: local LLM failed: %s. Falling back to OpenRouter.", exc)
+            logger.error("Chat: local LLM also failed: %s", exc)
 
-    logger.info("Chat: using OpenRouter (%s)...", Config.OPENROUTER_MODEL)
-    yield from _stream_openrouter(messages)
+    raise RuntimeError("All chat backends failed.")
 
 
 def save_message(meeting_id: str, user_id: str, role: str, content: str) -> dict:
