@@ -1,18 +1,19 @@
 """
-VoiceNotes PM - Page routes.
+VoiceNotez - Page routes.
 Renders server-side HTML templates for each page.
 """
-from flask import Blueprint, render_template
+from flask import Blueprint, render_template, send_from_directory
 from flask_login import login_required, current_user
 
 main_bp = Blueprint("main", __name__, url_prefix="/")
 
 
 @main_bp.route("/")
-@login_required
 def index():
-    """Render the main dashboard with meeting list and folders sidebar."""
-    return render_template("dashboard.html")
+    """Landing page for visitors, dashboard for authenticated users."""
+    if current_user.is_authenticated:
+        return render_template("dashboard.html")
+    return render_template("landing.html")
 
 
 @main_bp.route("/meeting/<meeting_id>")

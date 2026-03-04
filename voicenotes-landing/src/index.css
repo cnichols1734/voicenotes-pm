@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-primary text-background font-sans overflow-x-hidden;
+    background-color: #0A0A14;
+    /* Deep Void */
+    color: #F0EFF4;
+    /* Ghost */
+  }
+
+  /* Micro-Interactions */
+  ::selection {
+    @apply bg-accent text-primary;
+  }
+}
+
+@layer utilities {
+  .clip-text {
+    /* For gradient text or similar if needed */
+    -webkit-background-clip: text;
+    color: transparent;
+  }
+
+  .hover-lift {
+    @apply transition-transform duration-300;
+  }
+
+  .hover-lift:hover {
+    transform: translateY(-1px);
+  }
+
+  /* Magnetic button */
+  .btn-magnetic {
+    @apply transition-transform overflow-hidden relative inline-flex items-center justify-center;
+    transition-timing-function: cubic-bezier(0.25, 0.46, 0.45, 0.94);
+    transition-duration: 400ms;
+  }
+
+  .btn-magnetic:hover {
+    transform: scale(1.03);
+  }
+
+  .btn-sliding-mask>span.sliding-bg {
+    @apply absolute inset-0 bg-white/10 opacity-0 transition-opacity duration-300;
+  }
+
+  .btn-magnetic:hover>span.sliding-bg {
+    @apply opacity-100;
+  }
+}
+
+/* Noise overlay added directly on body */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  opacity: 0.05;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
