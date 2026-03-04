@@ -90,6 +90,137 @@ window.api = async function (endpoint, options = {}) {
 };
 
 // ---------------------------------------------------------------------------
+// Custom Confirm Modal  (replaces native browser confirm/alert)
+// ---------------------------------------------------------------------------
+window.showConfirmModal = function ({ title, message, confirmText = 'Delete', cancelText = 'Cancel', isDanger = true, inputField = null, onConfirm }) {
+    const existing = document.getElementById('_confirm_modal_root');
+    if (existing) existing.remove();
+
+    const root = document.createElement('div');
+    root.id = '_confirm_modal_root';
+
+    // Only show the icon for confirm dialogs, not for input prompts
+    const iconHtml = inputField ? '' : (() => {
+        const bg = isDanger ? 'rgba(255,69,58,0.14)' : 'rgba(10,132,255,0.12)';
+        const col = isDanger ? 'var(--accent-danger)' : 'var(--accent-primary)';
+        const path = isDanger
+            ? `<polyline points="3 6 5 6 21 6"/>
+               <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+               <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>`
+            : `<circle cx="12" cy="12" r="10"/>
+               <line x1="12" y1="8" x2="12" y2="12"/>
+               <line x1="12" y1="16" x2="12.01" y2="16"/>`;
+        return `<div class="confirm-modal-icon" style="background:${bg};">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="${col}" stroke-width="2"
+                       stroke-linecap="round" stroke-linejoin="round">${path}</svg>
+                </div>`;
+    })();
+
+    const inputHtml = inputField
+        ? `<div class="confirm-modal-input-wrap">
+             <input class="confirm-modal-input" type="text" id="_confirm_modal_input"
+               placeholder="${inputField.placeholder || ''}"
+               value="${(inputField.defaultValue || '').replace(/"/g, '&quot;')}"
+               autocomplete="off" autocorrect="off" spellcheck="false" />
+           </div>`
+        : '';
+
+    root.innerHTML = `
+      <div class="confirm-modal-backdrop" id="_confirm_modal_bd">
+        <div class="confirm-modal" role="alertdialog" aria-modal="true">
+          ${iconHtml}
+          <div class="confirm-modal-title" style="${inputField ? 'padding-top:24px;' : ''}">${title}</div>
+          ${message ? `<div class="confirm-modal-desc">${message}</div>` : ''}
+          ${inputHtml}
+          <div class="confirm-modal-actions">
+            <button class="confirm-modal-btn ${isDanger ? 'btn-danger' : 'btn-primary-action'}" id="_confirm_modal_ok">${confirmText}</button>
+            <button class="confirm-modal-btn btn-cancel" id="_confirm_modal_cancel">${cancelText}</button>
+          </div>
+        </div>
+      </div>`;
+
+    document.body.appendChild(root);
+
+    const backdrop = root.querySelector('#_confirm_modal_bd');
+    const inputEl = root.querySelector('#_confirm_modal_input');
+
+    function close() {
+        backdrop.classList.remove('visible');
+        setTimeout(() => root.remove(), 350);
+    }
+
+    requestAnimationFrame(() => requestAnimationFrame(() => backdrop.classList.add('visible')));
+
+    if (inputEl) {
+        setTimeout(() => inputEl.focus(), 400);
+        inputEl.addEventListener('keydown', e => {
+            if (e.key === 'Enter') root.querySelector('#_confirm_modal_ok').click();
+            if (e.key === 'Escape') close();
+        });
+    }
+
+    root.querySelector('#_confirm_modal_ok').addEventListener('click', () => {
+        close();
+        if (onConfirm) onConfirm(inputEl ? inputEl.value.trim() : undefined);
+    });
+
+    root.querySelector('#_confirm_modal_cancel').addEventListener('click', close);
+    backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+};
+
+// ---------------------------------------------------------------------------
+// Folder Action Sheet  (iOS-style bottom sheet)
+// ---------------------------------------------------------------------------
+window.showActionSheet = function ({ title, actions, onCancel }) {
+    const existing = document.getElementById('_action_sheet_root');
+    if (existing) existing.remove();
+
+    const actionsHtml = actions.map(a => `
+      <button class="action-sheet-item ${a.danger ? 'action-danger' : ''}" data-as-id="${a.id}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${a.icon}</svg>
+        ${a.label}
+      </button>`).join('');
+
+    const root = document.createElement('div');
+    root.id = '_action_sheet_root';
+    root.innerHTML = `
+      <div class="action-sheet-backdrop" id="_as_bd"></div>
+      <div class="action-sheet" id="_as_sheet" role="dialog" aria-modal="true">
+        <div class="action-sheet-group">
+          ${title ? `<div class="action-sheet-header">${title}</div>` : ''}
+          ${actionsHtml}
+        </div>
+        <div class="action-sheet-cancel-group">
+          <button class="action-sheet-cancel-btn" id="_as_cancel">Cancel</button>
+        </div>
+      </div>`;
+
+    document.body.appendChild(root);
+
+    const backdrop = root.querySelector('#_as_bd');
+    const sheet = root.querySelector('#_as_sheet');
+
+    function close(cb) {
+        backdrop.classList.remove('visible');
+        sheet.classList.remove('visible');
+        setTimeout(() => { root.remove(); if (cb) cb(); }, 320);
+    }
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+        backdrop.classList.add('visible');
+        sheet.classList.add('visible');
+    }));
+
+    backdrop.addEventListener('click', () => close(onCancel));
+    root.querySelector('#_as_cancel').addEventListener('click', () => close(onCancel));
+
+    actions.forEach(action => {
+        const btn = root.querySelector(`[data-as-id="${action.id}"]`);
+        if (btn && action.handler) btn.addEventListener('click', () => close(action.handler));
+    });
+};
+
+// ---------------------------------------------------------------------------
 // Page initialization
 // ---------------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
