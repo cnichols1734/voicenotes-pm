@@ -12,6 +12,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(messag
 
 def create_app():
     """Create and configure the Flask application."""
+    import time
     from flask import Flask
     from flask_cors import CORS
     from flask_login import LoginManager
@@ -20,6 +21,12 @@ def create_app():
 
     app = Flask(__name__)
     app.config.from_object(Config)
+
+    _cache_bust = str(int(time.time()))
+
+    @app.context_processor
+    def inject_cache_bust():
+        return dict(cache_bust=_cache_bust)
 
     # Trust Railway's reverse proxy headers so redirects use https://
     from werkzeug.middleware.proxy_fix import ProxyFix
