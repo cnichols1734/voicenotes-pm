@@ -1,10 +1,15 @@
 """
 VoiceNotes PM - Meeting chat service.
 Provides streaming chat with AI about a specific meeting's transcript and summary.
+
+Supports two backends (same strategy as summarizer_service):
+  1. Local LLM (via LM Studio / OpenAI-compatible) — tried first if LLM_BASE_URL is set
+  2. OpenRouter API — used as fallback, or as primary if no local URL configured
 """
 import json
 import logging
 
+import openai
 import requests
 
 from config import Config
@@ -79,13 +84,35 @@ def build_messages(meeting: dict, chat_history: list, user_message: str) -> list
     return messages
 
 
-def stream_chat_response(meeting: dict, chat_history: list, user_message: str):
+def _stream_local(messages: list):
     """
-    Generator that yields text chunks from OpenRouter streaming response.
-    Raises RuntimeError on API failure.
+    Stream chat from local LM Studio (OpenAI-compatible API).
+    Yields text chunks.
     """
-    messages = build_messages(meeting, chat_history, user_message)
+    client = openai.OpenAI(
+        api_key="lm-studio",
+        base_url=Config.LLM_BASE_URL,
+        timeout=300,
+    )
 
+    stream = client.chat.completions.create(
+        model=Config.LLM_MODEL,
+        messages=messages,
+        temperature=0.3,
+        stream=True,
+    )
+
+    for chunk in stream:
+        delta = chunk.choices[0].delta if chunk.choices else None
+        if delta and delta.content:
+            yield delta.content
+
+
+def _stream_openrouter(messages: list):
+    """
+    Stream chat from OpenRouter API.
+    Yields text chunks.
+    """
     headers = {
         "Authorization": f"Bearer {Config.OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
@@ -100,26 +127,22 @@ def stream_chat_response(meeting: dict, chat_history: list, user_message: str):
         "stream": True,
     }
 
-    try:
-        response = requests.post(
-            OPENROUTER_ENDPOINT,
-            headers=headers,
-            json=payload,
-            timeout=120,
-            stream=True,
-        )
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise RuntimeError(f"OpenRouter API request failed: {exc}") from exc
+    response = requests.post(
+        OPENROUTER_ENDPOINT,
+        headers=headers,
+        json=payload,
+        timeout=120,
+        stream=True,
+    )
+    response.raise_for_status()
 
+    response.encoding = "utf-8"
     for line in response.iter_lines(decode_unicode=True):
         if not line or not line.startswith("data: "):
             continue
-
-        data_str = line[6:]  # strip "data: " prefix
+        data_str = line[6:]
         if data_str.strip() == "[DONE]":
             break
-
         try:
             chunk = json.loads(data_str)
             delta = chunk.get("choices", [{}])[0].get("delta", {})
@@ -128,6 +151,28 @@ def stream_chat_response(meeting: dict, chat_history: list, user_message: str):
                 yield content
         except (json.JSONDecodeError, IndexError, KeyError):
             continue
+
+
+def stream_chat_response(meeting: dict, chat_history: list, user_message: str):
+    """
+    Generator that yields text chunks from the chat model.
+
+    Strategy (same as summarizer):
+      1. If LLM_BASE_URL is configured, try local LM Studio first.
+      2. If local fails (or not configured), fall back to OpenRouter.
+    """
+    messages = build_messages(meeting, chat_history, user_message)
+
+    if Config.LLM_BASE_URL:
+        try:
+            logger.info("Chat: trying local LLM (%s) at %s...", Config.LLM_MODEL, Config.LLM_BASE_URL)
+            yield from _stream_local(messages)
+            return
+        except Exception as exc:
+            logger.warning("Chat: local LLM failed: %s. Falling back to OpenRouter.", exc)
+
+    logger.info("Chat: using OpenRouter (%s)...", Config.OPENROUTER_MODEL)
+    yield from _stream_openrouter(messages)
 
 
 def save_message(meeting_id: str, user_id: str, role: str, content: str) -> dict:
