@@ -1128,17 +1128,28 @@ select {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border-subtle);
+  padding: 14px;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-sm);
+  margin-bottom: 8px;
+  transition: opacity var(--transition-default);
 }
 
 .action-item:last-child {
-  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.action-item.completed {
+  opacity: 0.5;
+}
+
+.action-item.completed .action-task {
+  text-decoration: line-through;
 }
 
 .action-checkbox {
-  width: 18px;
-  height: 18px;
+  width: 20px;
+  height: 20px;
   border: 2px solid var(--border-default);
   border-radius: 4px;
   flex-shrink: 0;
@@ -1148,6 +1159,10 @@ select {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.action-checkbox:hover {
+  border-color: var(--accent-primary);
 }
 
 .action-checkbox.checked {
@@ -1166,6 +1181,7 @@ select {
 
 .action-item-body {
   flex: 1;
+  min-width: 0;
 }
 
 .action-task {
@@ -1198,6 +1214,62 @@ select {
 
 .action-pill.deadline {
   color: var(--text-secondary);
+  cursor: pointer;
+  position: relative;
+}
+
+.action-pill.deadline:hover {
+  color: var(--text-primary);
+}
+
+/* Priority pills */
+.action-pill.priority-pill {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+.action-pill.priority-high {
+  color: var(--accent-danger);
+  background: rgba(255, 69, 58, 0.15);
+}
+
+.action-pill.priority-medium {
+  color: var(--accent-warning);
+  background: rgba(255, 214, 10, 0.15);
+}
+
+.action-pill.priority-low {
+  color: var(--accent-success);
+  background: rgba(50, 215, 75, 0.15);
+}
+
+/* Inline deadline date picker */
+.deadline-date-input {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 4px 8px;
+  color-scheme: dark;
+}
+
+/* Action items count badge */
+.action-items-count {
+  display: none;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 2px 10px;
+  border-radius: var(--radius-full);
+  background: var(--accent-primary-muted);
+  color: var(--accent-primary);
+  margin-left: 8px;
 }
 
 /* Decisions */
@@ -2522,24 +2594,25 @@ select {
 }
 
 /* =====================================================
-   AI Title Generation Button
+   Auto Title Generation
    ===================================================== */
-.title-input-row {
-  display: flex;
-  gap: 8px;
-  align-items: stretch;
+.title-input-wrapper {
+  position: relative;
 }
 
-.title-input-row .form-input {
-  flex: 1;
-  min-width: 0;
+.title-input-wrapper .form-input {
+  width: 100%;
+  padding-right: 40px;
 }
 
-.ai-title-btn {
-  white-space: nowrap;
-  flex-shrink: 0;
-  height: 40px;
-  font-size: 13px;
+.title-spinner {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: none;
+  align-items: center;
+  justify-content: center;
 }
 
 /* =====================================================

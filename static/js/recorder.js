@@ -426,7 +426,10 @@ window.RecorderModule = (() => {
                 grid.querySelectorAll('.meeting-type-card').forEach(c => c.classList.remove('selected'));
                 card.classList.add('selected');
                 selectedMeetingTypeId = type.id;
-                setTimeout(() => showState('details'), 300);
+                setTimeout(() => {
+                    showState('details');
+                    autoGenerateTitle();
+                }, 300);
             });
             grid.appendChild(card);
         });
@@ -493,18 +496,15 @@ window.RecorderModule = (() => {
     // ---------------------------------------------------------------------------
     // Event bindings (called once on DOMContentLoaded)
     // ---------------------------------------------------------------------------
-    async function generateAITitle() {
-        const btn = getEl('ai-title-btn');
+    async function autoGenerateTitle() {
         const input = getEl('meeting-title-input');
-        if (!btn || !input) return;
-        if (!currentMeetingId) {
-            showToast('No meeting to generate title for.', 'error');
-            return;
-        }
+        const spinner = getEl('title-spinner');
+        if (!input) return;
+        if (!currentMeetingId) return;
 
-        const origHTML = btn.innerHTML;
-        btn.disabled = true;
-        btn.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;"></span> Generating...';
+        input.value = '';
+        input.placeholder = 'Generating title...';
+        if (spinner) spinner.style.display = 'flex';
 
         try {
             const response = await fetch('/api/recordings/generate-title', {
@@ -519,26 +519,20 @@ window.RecorderModule = (() => {
                 data = JSON.parse(text);
             } catch (parseErr) {
                 console.error('Title response not JSON:', text.slice(0, 200));
-                showToast('Failed to generate title: unexpected server response', 'error');
-                btn.disabled = false;
-                btn.innerHTML = origHTML;
+                input.placeholder = 'Enter meeting title...';
+                if (spinner) spinner.style.display = 'none';
                 return;
             }
 
             if (response.ok && data.title) {
                 input.value = data.title;
-                input.focus();
-                showToast('Title generated!', 'success');
-            } else {
-                showToast(data.error || 'Failed to generate title', 'error');
             }
         } catch (err) {
-            console.error('Title generation fetch error:', err);
-            showToast(`Failed to generate title: ${err.message}`, 'error');
+            console.error('Title generation failed:', err);
         }
 
-        btn.disabled = false;
-        btn.innerHTML = origHTML;
+        input.placeholder = 'Enter meeting title...';
+        if (spinner) spinner.style.display = 'none';
     }
 
     function bindEvents() {
@@ -550,9 +544,6 @@ window.RecorderModule = (() => {
 
         const genBtn = getEl('generate-summary-btn');
         if (genBtn) genBtn.addEventListener('click', generateSummary);
-
-        const aiTitleBtn = getEl('ai-title-btn');
-        if (aiTitleBtn) aiTitleBtn.addEventListener('click', generateAITitle);
     }
 
     document.addEventListener('DOMContentLoaded', bindEvents);

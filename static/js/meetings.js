@@ -5,6 +5,7 @@
 
 window.MeetingsModule = (() => {
     let allMeetings = [];
+    let currentMeeting = null; // module-scoped for action item persistence
 
     function getEl(id) { return document.getElementById(id); }
 
@@ -237,6 +238,7 @@ window.MeetingsModule = (() => {
             ]);
 
             const meeting = meetingData.meeting;
+            currentMeeting = meeting;
             const types = typesData.meeting_types || [];
             const folders = foldersData.folders || [];
 
@@ -310,19 +312,70 @@ window.MeetingsModule = (() => {
             if (summary.action_items.length === 0) {
                 actionsEl.innerHTML = '<p class="text-secondary">No action items recorded.</p>';
             } else {
-                actionsEl.innerHTML = summary.action_items.map(item => `
-          <div class="action-item">
-            <div class="action-checkbox" onclick="this.classList.toggle('checked')"></div>
+                actionsEl.innerHTML = summary.action_items.map((item, idx) => {
+                    const checked = item.completed ? ' checked' : '';
+                    const completedClass = item.completed ? ' completed' : '';
+                    const priorityLabel = item.priority ? item.priority.charAt(0).toUpperCase() + item.priority.slice(1) : '';
+                    const priorityClass = item.priority ? ` priority-${item.priority}` : '';
+                    return `
+          <div class="action-item${completedClass}" data-index="${idx}">
+            <div class="action-checkbox${checked}" data-index="${idx}"></div>
             <div class="action-item-body">
               <div class="action-task">${escapeHtml(item.task)}</div>
               <div class="action-pills">
                 ${item.owner ? `<span class="action-pill owner"><i data-lucide="user"></i> ${escapeHtml(item.owner)}</span>` : ''}
-                ${item.deadline ? `<span class="action-pill deadline"><i data-lucide="calendar"></i> ${escapeHtml(item.deadline)}</span>` : ''}
-                ${item.priority ? `<span class="priority-dot ${item.priority}" title="${item.priority} priority"></span>` : ''}
+                ${item.deadline ? `<span class="action-pill deadline" data-index="${idx}"><i data-lucide="calendar"></i> <span class="deadline-text">${escapeHtml(item.deadline)}</span></span>` : ''}
+                ${item.priority ? `<span class="action-pill priority-pill${priorityClass}">${priorityLabel}</span>` : ''}
               </div>
             </div>
-          </div>
-        `).join('');
+          </div>`;
+                }).join('');
+
+                // Bind checkbox clicks
+                actionsEl.querySelectorAll('.action-checkbox').forEach(cb => {
+                    cb.addEventListener('click', () => {
+                        const idx = parseInt(cb.dataset.index);
+                        const item = summary.action_items[idx];
+                        item.completed = !item.completed;
+                        cb.classList.toggle('checked');
+                        cb.closest('.action-item').classList.toggle('completed');
+                        updateActionItemsCount(summary.action_items);
+                        saveActionItems();
+                    });
+                });
+
+                // Bind deadline pill clicks for inline date editing
+                actionsEl.querySelectorAll('.action-pill.deadline').forEach(pill => {
+                    pill.addEventListener('click', (e) => {
+                        if (e.target.closest('.deadline-date-input')) return;
+                        const idx = parseInt(pill.dataset.index);
+                        const item = summary.action_items[idx];
+                        const existing = pill.querySelector('.deadline-date-input');
+                        if (existing) { existing.remove(); return; }
+
+                        const dateInput = document.createElement('input');
+                        dateInput.type = 'date';
+                        dateInput.className = 'deadline-date-input';
+                        dateInput.value = item.deadline && item.deadline !== 'TBD' && /^\d{4}-\d{2}-\d{2}$/.test(item.deadline) ? item.deadline : '';
+                        pill.appendChild(dateInput);
+                        dateInput.focus();
+
+                        dateInput.addEventListener('change', () => {
+                            if (dateInput.value) {
+                                item.deadline = dateInput.value;
+                                pill.querySelector('.deadline-text').textContent = dateInput.value;
+                            }
+                            dateInput.remove();
+                            saveActionItems();
+                        });
+
+                        dateInput.addEventListener('blur', () => {
+                            setTimeout(() => dateInput.remove(), 150);
+                        });
+                    });
+                });
+
+                updateActionItemsCount(summary.action_items);
             }
         }
 
@@ -357,6 +410,32 @@ window.MeetingsModule = (() => {
         }
 
         if (window.lucide) lucide.createIcons();
+    }
+
+    function updateActionItemsCount(actionItems) {
+        const countEl = getEl('action-items-count');
+        if (!countEl || !actionItems) return;
+        const done = actionItems.filter(i => i.completed).length;
+        const total = actionItems.length;
+        if (total > 0) {
+            countEl.textContent = `${done}/${total} done`;
+            countEl.style.display = 'inline-block';
+        } else {
+            countEl.style.display = 'none';
+        }
+    }
+
+    async function saveActionItems() {
+        if (!currentMeeting || !currentMeeting.summary) return;
+        try {
+            await api(`/api/recordings/${currentMeeting.id}`, {
+                method: 'PUT',
+                body: { summary: currentMeeting.summary },
+            });
+        } catch (err) {
+            console.error('Failed to save action items:', err);
+            showToast('Failed to save changes.', 'error');
+        }
     }
 
     function renderTranscript(transcript) {
@@ -416,6 +495,7 @@ window.MeetingsModule = (() => {
                 body: { meeting_id: meetingId, meeting_type_id: typeId },
             });
             hideSummarizingSpinner();
+            currentMeeting = data.meeting;
             renderSummary(data.meeting.summary);
             showToast('Summary updated!', 'success');
         } catch (err) {

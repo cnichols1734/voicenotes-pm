@@ -40,7 +40,7 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
         {{
             "task": "specific task description",
             "owner": "person responsible or 'Me' for the PM",
-            "deadline": "mentioned deadline or 'TBD'",
+            "deadline": "YYYY-MM-DD if a specific date is mentioned, otherwise 'TBD'",
             "priority": "high | medium | low"
         }}
     ],
@@ -90,7 +90,7 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
         {{
             "task": "specific task description",
             "owner": "person responsible or 'Me' for the PM",
-            "deadline": "mentioned deadline or 'TBD'",
+            "deadline": "YYYY-MM-DD if a specific date is mentioned, otherwise 'TBD'",
             "priority": "high | medium | low"
         }}
     ],
@@ -142,7 +142,7 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
         {{
             "task": "specific task description",
             "owner": "Me",
-            "deadline": "mentioned deadline or 'TBD'",
+            "deadline": "YYYY-MM-DD if a specific date is mentioned, otherwise 'TBD'",
             "priority": "high | medium | low"
         }}
     ],
@@ -191,7 +191,7 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
         {{
             "task": "specific task description",
             "owner": "person responsible or 'Me' for the PM",
-            "deadline": "mentioned deadline or 'TBD'",
+            "deadline": "YYYY-MM-DD if a specific date is mentioned, otherwise 'TBD'",
             "priority": "high | medium | low"
         }}
     ],
@@ -243,7 +243,7 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
         {{
             "task": "specific task description",
             "owner": "person responsible or 'Me' for the PM",
-            "deadline": "end of sprint or specific date or 'TBD'",
+            "deadline": "YYYY-MM-DD if a specific date is mentioned, otherwise 'TBD'",
             "priority": "high | medium | low"
         }}
     ],
@@ -293,7 +293,7 @@ Respond ONLY with a valid JSON object (no markdown fences, no preamble, no extra
         {{
             "task": "specific task description",
             "owner": "person responsible or 'Me' for the PM",
-            "deadline": "mentioned deadline or 'TBD'",
+            "deadline": "YYYY-MM-DD if a specific date is mentioned, otherwise 'TBD'",
             "priority": "high | medium | low"
         }}
     ],

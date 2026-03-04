@@ -322,7 +322,7 @@ def summarize_recording():
 def update_recording(meeting_id):
     """Update a meeting (title, folder_id, meeting_type_id)."""
     data = request.get_json(force=True) or {}
-    allowed = {"title", "folder_id", "meeting_type_id"}
+    allowed = {"title", "folder_id", "meeting_type_id", "summary"}
     update_data = {k: v for k, v in data.items() if k in allowed}
 
     if not update_data:
