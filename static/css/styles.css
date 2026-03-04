@@ -3049,6 +3049,7 @@ html {
 }
 
 /* Desktop card delete button */
+/* Delete button: hidden on touch devices, hover-reveal on desktop */
 .card-delete-btn {
   opacity: 0;
   transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast) !important;
@@ -3063,6 +3064,15 @@ html {
 .card-delete-btn:hover {
   color: var(--accent-danger) !important;
   background: rgba(255, 69, 58, 0.12) !important;
+}
+
+@media (hover: none) {
+  .card-delete-btn {
+    display: none !important;
+  }
+  .meeting-card-actions {
+    padding: 0 6px;
+  }
 }
 
 /* Swipe-commit: collapse the row height after card flies out */
