@@ -2989,3 +2989,377 @@ html {
     font-size: 16px !important;
   }
 }
+
+/* =====================================================
+   Swipe-to-Delete  (iOS-style meeting cards)
+   ===================================================== */
+.swipe-row {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+}
+
+.swipe-row > .meeting-card {
+  margin-bottom: 0;
+  border-radius: var(--radius-md);
+  position: relative;
+  z-index: 1;
+  transition: transform 380ms cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  will-change: transform;
+}
+
+.swipe-row.is-swiping > .meeting-card {
+  transition: none;
+}
+
+.swipe-delete-bg {
+  position: absolute;
+  inset: 0;
+  background: var(--accent-danger);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.swipe-delete-reveal-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: 84px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+  text-transform: uppercase;
+}
+
+.swipe-delete-reveal-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+/* Desktop card delete button */
+.card-delete-btn {
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast) !important;
+}
+
+.meeting-card:hover .card-delete-btn {
+  opacity: 1;
+}
+
+.card-delete-btn:hover {
+  color: var(--accent-danger) !important;
+  background: rgba(255, 69, 58, 0.12) !important;
+}
+
+/* Swipe-commit: collapse the row height after card flies out */
+.swipe-row.swipe-committing {
+  transition: max-height 320ms ease, opacity 280ms ease, margin-bottom 320ms ease;
+  overflow: hidden;
+}
+
+/* =====================================================
+   Custom Confirm Modal  (native-app feel)
+   ===================================================== */
+.confirm-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 700;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+
+@media (min-width: 480px) {
+  .confirm-modal-backdrop {
+    align-items: center;
+    padding: 20px;
+  }
+}
+
+.confirm-modal-backdrop.visible {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.confirm-modal {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: var(--shadow-lg);
+  transform: translateY(100%);
+  transition: transform 380ms cubic-bezier(0.34, 1.4, 0.64, 1);
+  overflow: hidden;
+}
+
+@media (min-width: 480px) {
+  .confirm-modal {
+    border-radius: var(--radius-lg);
+    transform: translateY(16px) scale(0.97);
+    transition: transform 320ms cubic-bezier(0.34, 1.3, 0.64, 1);
+  }
+}
+
+.confirm-modal-backdrop.visible .confirm-modal {
+  transform: translateY(0) scale(1);
+}
+
+.confirm-modal-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  background: rgba(255, 69, 58, 0.14);
+  margin: 28px auto 0;
+}
+
+.confirm-modal-icon svg {
+  width: 22px;
+  height: 22px;
+  color: var(--accent-danger);
+}
+
+.confirm-modal-title {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-align: center;
+  padding: 14px 28px 6px;
+  line-height: 1.3;
+}
+
+.confirm-modal-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  text-align: center;
+  padding: 0 32px 24px;
+  line-height: 1.5;
+}
+
+.confirm-modal-input-wrap {
+  padding: 0 20px 20px;
+}
+
+.confirm-modal-input {
+  width: 100%;
+  padding: 13px 16px;
+  background: var(--bg-hover);
+  border: 1.5px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 15px;
+  font-family: var(--font-sans);
+  outline: none;
+  transition: border-color 150ms ease;
+  -webkit-appearance: none;
+}
+
+.confirm-modal-input:focus {
+  border-color: var(--accent-primary);
+}
+
+.confirm-modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.confirm-modal-btn {
+  width: 100%;
+  padding: 16px 20px;
+  border: none;
+  background: transparent;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease;
+  color: var(--text-primary);
+  text-align: center;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.confirm-modal-btn:not(:last-child) {
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.confirm-modal-btn:active {
+  background: var(--bg-hover);
+}
+
+.confirm-modal-btn.btn-danger {
+  color: var(--accent-danger);
+  font-weight: 600;
+}
+
+.confirm-modal-btn.btn-primary-action {
+  color: var(--accent-primary);
+  font-weight: 600;
+}
+
+.confirm-modal-btn.btn-cancel {
+  color: var(--text-secondary);
+}
+
+/* =====================================================
+   Folder Action Sheet  (iOS bottom sheet)
+   ===================================================== */
+.action-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+  z-index: 500;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+
+.action-sheet-backdrop.visible {
+  opacity: 1;
+  pointer-events: all;
+}
+
+.action-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 501;
+  padding: 0 10px calc(10px + env(safe-area-inset-bottom));
+  transform: translateY(110%);
+  transition: transform 400ms cubic-bezier(0.34, 1.26, 0.64, 1);
+  pointer-events: none;
+}
+
+.action-sheet.visible {
+  transform: translateY(0);
+  pointer-events: all;
+}
+
+.action-sheet-group {
+  background: rgba(38, 38, 40, 0.96);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.action-sheet-header {
+  padding: 12px 16px 8px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.action-sheet-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 20px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 16px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: background 100ms ease;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.action-sheet-item:not(:last-child) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.action-sheet-item:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.action-sheet-item svg {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--accent-primary);
+}
+
+.action-sheet-item.action-danger {
+  color: var(--accent-danger);
+}
+
+.action-sheet-item.action-danger svg {
+  color: var(--accent-danger);
+}
+
+.action-sheet-cancel-group {
+  background: rgba(38, 38, 40, 0.96);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.action-sheet-cancel-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  padding: 17px;
+  border: none;
+  background: transparent;
+  color: var(--accent-primary);
+  font-family: var(--font-sans);
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.action-sheet-cancel-btn:active {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Long-press ripple on folder items */
+.sidebar-item {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.sidebar-item.long-press-active {
+  background: var(--bg-hover);
+  transition: background 100ms ease;
+}

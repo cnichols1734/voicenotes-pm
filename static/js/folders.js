@@ -54,10 +54,49 @@ window.FoldersModule = (() => {
         <span class="sidebar-item-name">${folder.name}</span>
       `;
             btn.addEventListener('click', () => selectFolder(folder.id));
+
+            // Desktop: right-click context menu
             btn.addEventListener('contextmenu', e => { e.preventDefault(); openContextMenu(e, folder); });
+
+            // Mobile: long-press action sheet
+            addLongPressHandler(btn, folder);
+
             list.appendChild(btn);
         });
         if (window.lucide) lucide.createIcons();
+    }
+
+    // Long-press detection (500 ms hold → action sheet)
+    function addLongPressHandler(btn, folder) {
+        let timer = null;
+        let justLongPressed = false;
+
+        btn.addEventListener('touchstart', () => {
+            justLongPressed = false;
+            timer = setTimeout(() => {
+                justLongPressed = true;
+                btn.classList.remove('long-press-active');
+                openFolderActionSheet(folder);
+            }, 500);
+            btn.classList.add('long-press-active');
+        }, { passive: true });
+
+        function cancelPress() {
+            clearTimeout(timer);
+            btn.classList.remove('long-press-active');
+        }
+
+        btn.addEventListener('touchend', cancelPress, { passive: true });
+        btn.addEventListener('touchmove', cancelPress, { passive: true });
+        btn.addEventListener('touchcancel', cancelPress, { passive: true });
+
+        // Capture-phase interceptor: suppress the synthetic click that fires after a long-press
+        btn.addEventListener('click', (e) => {
+            if (justLongPressed) {
+                e.stopImmediatePropagation();
+                justLongPressed = false;
+            }
+        }, true);
     }
 
     function updateFolderCount() {
@@ -159,7 +198,7 @@ window.FoldersModule = (() => {
     }
 
     // ---------------------------------------------------------------------------
-    // Context menu
+    // Context menu  (desktop right-click)
     // ---------------------------------------------------------------------------
     function openContextMenu(event, folder) {
         contextTarget = folder;
@@ -176,33 +215,112 @@ window.FoldersModule = (() => {
         contextTarget = null;
     }
 
-    async function renameFolder() {
-        if (!contextTarget) return;
-        closeContextMenu();
-        const newName = prompt('Rename folder:', contextTarget.name);
-        if (!newName || !newName.trim()) return;
-        try {
-            await api(`/api/folders/${contextTarget.id}`, {
-                method: 'PUT',
-                body: { name: newName.trim() },
-            });
-            const f = folders.find(x => x.id === contextTarget.id);
-            if (f) f.name = newName.trim();
-            renderFolders();
-            showToast('Folder renamed.', 'success');
-        } catch (err) {
-            showToast(`Failed to rename: ${err.message}`, 'error');
-        }
+    // ---------------------------------------------------------------------------
+    // Action sheet  (mobile long-press)
+    // ---------------------------------------------------------------------------
+    function openFolderActionSheet(folder) {
+        contextTarget = folder;
+        window.showActionSheet({
+            title: folder.name,
+            actions: [
+                {
+                    id: 'rename',
+                    label: 'Rename',
+                    icon: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>',
+                    handler: () => {
+                        contextTarget = folder; // re-set after sheet closes
+                        renameFolder();
+                    },
+                },
+                {
+                    id: 'color',
+                    label: 'Change Color',
+                    icon: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/>',
+                    handler: () => {
+                        contextTarget = folder;
+                        changeColorFromSheet(folder);
+                    },
+                },
+                {
+                    id: 'delete',
+                    label: 'Delete Folder',
+                    icon: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>',
+                    danger: true,
+                    handler: () => {
+                        contextTarget = folder;
+                        deleteFolderWithConfirm(folder);
+                    },
+                },
+            ],
+        });
     }
 
-    async function deleteFolder() {
+    function changeColorFromSheet(folder) {
+        const colorOptions = ['#6366f1', '#818cf8', '#34d399', '#fbbf24', '#f87171', '#a78bfa', '#38bdf8', '#fb923c'];
+        // Cycle to the next color
+        const currentIdx = colorOptions.indexOf(folder.color);
+        const nextColor = colorOptions[(currentIdx + 1) % colorOptions.length];
+        api(`/api/folders/${folder.id}`, { method: 'PUT', body: { color: nextColor } })
+            .then(() => {
+                const f = folders.find(x => x.id === folder.id);
+                if (f) f.color = nextColor;
+                renderFolders();
+                showToast('Folder color updated.', 'success');
+            })
+            .catch(err => showToast(`Failed: ${err.message}`, 'error'));
+    }
+
+    // ---------------------------------------------------------------------------
+    // Rename folder  (shared by context menu & action sheet)
+    // ---------------------------------------------------------------------------
+    function renameFolder() {
         if (!contextTarget) return;
+        const target = contextTarget;
         closeContextMenu();
-        if (!confirm(`Delete folder "${contextTarget.name}"? Meetings in it will remain unfiled.`)) return;
+
+        window.showConfirmModal({
+            title: 'Rename Folder',
+            message: null,
+            confirmText: 'Save',
+            cancelText: 'Cancel',
+            isDanger: false,
+            inputField: { placeholder: 'Folder name', defaultValue: target.name },
+            onConfirm: async (newName) => {
+                if (!newName) return;
+                try {
+                    await api(`/api/folders/${target.id}`, {
+                        method: 'PUT',
+                        body: { name: newName },
+                    });
+                    const f = folders.find(x => x.id === target.id);
+                    if (f) f.name = newName;
+                    renderFolders();
+                    showToast('Folder renamed.', 'success');
+                } catch (err) {
+                    showToast(`Failed to rename: ${err.message}`, 'error');
+                }
+            },
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Delete folder  (shared by context menu & action sheet)
+    // ---------------------------------------------------------------------------
+    function deleteFolderWithConfirm(folder) {
+        window.showConfirmModal({
+            title: 'Delete Folder?',
+            message: `"${folder.name}" will be removed. Meetings inside will move to No Folder.`,
+            confirmText: 'Delete Folder',
+            isDanger: true,
+            onConfirm: () => executeFolderDelete(folder.id),
+        });
+    }
+
+    async function executeFolderDelete(folderId) {
         try {
-            await api(`/api/folders/${contextTarget.id}`, { method: 'DELETE' });
-            folders = folders.filter(f => f.id !== contextTarget.id);
-            if (window.AppState.currentFolderFilter === contextTarget.id) {
+            await api(`/api/folders/${folderId}`, { method: 'DELETE' });
+            folders = folders.filter(f => f.id !== folderId);
+            if (window.AppState.currentFolderFilter === folderId) {
                 window.AppState.currentFolderFilter = null;
                 if (window.MeetingsModule) window.MeetingsModule.reload();
             }
@@ -211,6 +329,14 @@ window.FoldersModule = (() => {
         } catch (err) {
             showToast(`Failed to delete folder: ${err.message}`, 'error');
         }
+    }
+
+    // Keep old deleteFolder name for context-menu binding
+    function deleteFolder() {
+        if (!contextTarget) return;
+        const target = contextTarget;
+        closeContextMenu();
+        deleteFolderWithConfirm(target);
     }
 
     // ---------------------------------------------------------------------------

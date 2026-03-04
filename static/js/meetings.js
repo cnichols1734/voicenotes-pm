@@ -6,6 +6,7 @@
 window.MeetingsModule = (() => {
     let allMeetings = [];
     let currentMeeting = null; // module-scoped for action item persistence
+    let openSwipeRow = null;   // track the currently-open swipe row
 
     function getEl(id) { return document.getElementById(id); }
 
@@ -49,8 +50,11 @@ window.MeetingsModule = (() => {
 
         if (loading) loading.style.display = 'none';
 
+        // Reset any open swipe row tracker
+        openSwipeRow = null;
+
         // Remove existing cards
-        list.querySelectorAll('.meeting-card').forEach(el => el.remove());
+        list.querySelectorAll('.swipe-row').forEach(el => el.remove());
 
         // Apply search
         const query = window.AppState.searchQuery.toLowerCase();
@@ -74,8 +78,8 @@ window.MeetingsModule = (() => {
 
         const types = window.AppState.meetingTypes || [];
         filtered.forEach(meeting => {
-            const card = buildMeetingCard(meeting, types);
-            list.appendChild(card);
+            const row = buildMeetingCard(meeting, types);
+            list.appendChild(row);
         });
 
         if (window.lucide) lucide.createIcons();
@@ -90,6 +94,25 @@ window.MeetingsModule = (() => {
             ? (summary.executive_summary.length > 120 ? summary.executive_summary.slice(0, 120) + '...' : summary.executive_summary)
             : '';
 
+        // ── Swipe wrapper ────────────────────────────────────────────────────
+        const wrapper = document.createElement('div');
+        wrapper.className = 'swipe-row';
+
+        // Red delete background (revealed by swiping left)
+        const deleteBg = document.createElement('div');
+        deleteBg.className = 'swipe-delete-bg';
+        deleteBg.innerHTML = `
+          <button class="swipe-delete-reveal-btn" aria-label="Delete meeting">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="3 6 5 6 21 6"/>
+              <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+              <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+            </svg>
+            Delete
+          </button>`;
+
+        // ── The card itself ──────────────────────────────────────────────────
         const card = document.createElement('div');
         card.className = 'meeting-card';
         card.dataset.meetingId = meeting.id;
@@ -98,38 +121,194 @@ window.MeetingsModule = (() => {
         const folderBadge = folder ? `<span class="badge badge-folder"><i data-lucide="folder"></i> ${escapeHtml(folder.name)}</span>` : '';
 
         card.innerHTML = `
-      <div class="meeting-card-body">
-        <div class="meeting-card-header">
-          <div class="meeting-card-title">${escapeHtml(meeting.title)}</div>
-        </div>
-        <div class="meeting-card-meta">
-          ${typeBadge}${folderBadge}
-          <span class="badge-date">${formatDate(meeting.recorded_at)}</span>
-          ${meeting.duration_seconds ? `<span class="badge-date">${formatDuration(meeting.duration_seconds)}</span>` : ''}
-        </div>
-        ${preview ? `<div class="meeting-card-preview">${escapeHtml(preview)}</div>` : ''}
-      </div>
-      <div class="meeting-card-actions">
-        <button class="card-action-btn card-move-btn" title="Move to folder">
-          <i data-lucide="folder-input"></i>
-        </button>
-      </div>
-    `;
+          <div class="meeting-card-body">
+            <div class="meeting-card-header">
+              <div class="meeting-card-title">${escapeHtml(meeting.title)}</div>
+            </div>
+            <div class="meeting-card-meta">
+              ${typeBadge}${folderBadge}
+              <span class="badge-date">${formatDate(meeting.recorded_at)}</span>
+              ${meeting.duration_seconds ? `<span class="badge-date">${formatDuration(meeting.duration_seconds)}</span>` : ''}
+            </div>
+            ${preview ? `<div class="meeting-card-preview">${escapeHtml(preview)}</div>` : ''}
+          </div>
+          <div class="meeting-card-actions">
+            <button class="card-action-btn card-move-btn" title="Move to folder">
+              <i data-lucide="folder-input"></i>
+            </button>
+            <button class="card-action-btn card-delete-btn" title="Delete meeting">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+              </svg>
+            </button>
+          </div>`;
 
-        // Click body to navigate
-        const body = card.querySelector('.meeting-card-body');
-        body.addEventListener('click', () => {
+        // Navigate to detail on body click
+        card.querySelector('.meeting-card-body').addEventListener('click', () => {
+            if (wrapper.classList.contains('swipe-open')) {
+                snapSwipeClose(wrapper, card);
+                return;
+            }
             window.location.href = `/meeting/${meeting.id}`;
         });
 
         // Move-to-folder button
-        const moveBtn = card.querySelector('.card-move-btn');
-        moveBtn.addEventListener('click', (e) => {
+        card.querySelector('.card-move-btn').addEventListener('click', (e) => {
             e.stopPropagation();
             openMoveModal(meeting);
         });
 
-        return card;
+        // Desktop / tablet delete button
+        card.querySelector('.card-delete-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            confirmDeleteMeeting(meeting.id, wrapper);
+        });
+
+        // Swipe reveal delete button
+        deleteBg.querySelector('.swipe-delete-reveal-btn').addEventListener('click', (e) => {
+            e.stopPropagation();
+            confirmDeleteMeeting(meeting.id, wrapper);
+        });
+
+        // ── Touch swipe handler ──────────────────────────────────────────────
+        addSwipeHandler(wrapper, card, meeting.id);
+
+        wrapper.appendChild(deleteBg);
+        wrapper.appendChild(card);
+        return wrapper;
+    }
+
+    // ── Swipe-to-delete helpers ──────────────────────────────────────────────
+    const SWIPE_REVEAL = 84;     // px to reveal the delete button
+    const SWIPE_COMMIT = 160;    // px to auto-trigger delete without confirmation
+
+    function addSwipeHandler(wrapper, card, meetingId) {
+        let startX = 0, startY = 0, currentDx = 0;
+        let isTracking = false, isHorizontal = null;
+
+        card.addEventListener('touchstart', (e) => {
+            // Close any other open row first
+            if (openSwipeRow && openSwipeRow !== wrapper) {
+                snapSwipeClose(openSwipeRow, openSwipeRow.querySelector('.meeting-card'));
+            }
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            currentDx = 0;
+            isTracking = true;
+            isHorizontal = null;
+            wrapper.classList.add('is-swiping');
+        }, { passive: true });
+
+        card.addEventListener('touchmove', (e) => {
+            if (!isTracking) return;
+            const dx = e.touches[0].clientX - startX;
+            const dy = e.touches[0].clientY - startY;
+
+            if (isHorizontal === null && (Math.abs(dx) > 6 || Math.abs(dy) > 6)) {
+                isHorizontal = Math.abs(dx) > Math.abs(dy);
+            }
+            if (!isHorizontal) return;
+
+            e.preventDefault(); // prevent scroll while swiping horizontally
+            currentDx = Math.min(0, dx); // left swipe only
+            card.style.transform = `translateX(${currentDx}px)`;
+
+            if (Math.abs(currentDx) >= SWIPE_REVEAL) {
+                wrapper.classList.add('swipe-open');
+                openSwipeRow = wrapper;
+            } else {
+                wrapper.classList.remove('swipe-open');
+            }
+        }, { passive: false });
+
+        card.addEventListener('touchend', () => {
+            isTracking = false;
+            wrapper.classList.remove('is-swiping');
+
+            if (Math.abs(currentDx) >= SWIPE_COMMIT) {
+                // Far enough — delete immediately (no confirm)
+                executeDeleteMeeting(meetingId, wrapper);
+            } else if (Math.abs(currentDx) >= SWIPE_REVEAL) {
+                // Snap open to reveal Delete button
+                card.style.transform = `translateX(-${SWIPE_REVEAL}px)`;
+                wrapper.classList.add('swipe-open');
+                openSwipeRow = wrapper;
+            } else {
+                snapSwipeClose(wrapper, card);
+            }
+        }, { passive: true });
+    }
+
+    function snapSwipeClose(wrapper, card) {
+        if (!wrapper || !card) return;
+        card.style.transform = '';
+        wrapper.classList.remove('swipe-open', 'swipe-committing');
+        if (openSwipeRow === wrapper) openSwipeRow = null;
+    }
+
+    function confirmDeleteMeeting(meetingId, wrapper) {
+        // Close swipe if open so the modal appears cleanly
+        if (wrapper) snapSwipeClose(wrapper, wrapper.querySelector('.meeting-card'));
+
+        window.showConfirmModal({
+            title: 'Delete Meeting?',
+            message: 'This meeting and its summary will be permanently removed.',
+            confirmText: 'Delete',
+            isDanger: true,
+            onConfirm: () => executeDeleteMeeting(meetingId, wrapper),
+        });
+    }
+
+    async function executeDeleteMeeting(meetingId, wrapper) {
+        if (wrapper) {
+            // Measure height before adding transitions
+            const h = wrapper.offsetHeight;
+            const card = wrapper.querySelector('.meeting-card');
+
+            // Slide card out to the left
+            if (card) card.style.transform = `translateX(-110%)`;
+
+            // Short delay then collapse the row height
+            setTimeout(() => {
+                wrapper.classList.add('swipe-committing');
+                wrapper.style.maxHeight = h + 'px';
+                // Double rAF ensures start value is painted before end value is set
+                requestAnimationFrame(() => requestAnimationFrame(() => {
+                    wrapper.style.maxHeight = '0';
+                    wrapper.style.opacity = '0';
+                    wrapper.style.marginBottom = '0';
+                }));
+            }, 80);
+        }
+
+        try {
+            await api(`/api/recordings/${meetingId}`, { method: 'DELETE' });
+            showToast('Meeting deleted.', 'success');
+            allMeetings = allMeetings.filter(m => m.id !== meetingId);
+            setTimeout(() => {
+                if (wrapper) wrapper.remove();
+                // Show empty state if no more meetings
+                const list = getEl('meetings-list');
+                const empty = getEl('meetings-empty');
+                if (list && !list.querySelectorAll('.swipe-row').length && empty) {
+                    empty.style.display = 'flex';
+                }
+            }, 430);
+        } catch (err) {
+            showToast(`Failed to delete: ${err.message}`, 'error');
+            // Revert the animation
+            if (wrapper) {
+                wrapper.style.maxHeight = '';
+                wrapper.style.opacity = '';
+                wrapper.style.marginBottom = '';
+                wrapper.classList.remove('swipe-committing');
+                const card = wrapper.querySelector('.meeting-card');
+                if (card) card.style.transform = '';
+            }
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -608,14 +787,21 @@ window.MeetingsModule = (() => {
         // Delete
         const deleteBtn = getEl('delete-meeting-btn');
         if (deleteBtn) {
-            deleteBtn.addEventListener('click', async () => {
-                if (!confirm('Delete this meeting? This cannot be undone.')) return;
-                try {
-                    await api(`/api/recordings/${window.MEETING_ID}`, { method: 'DELETE' });
-                    window.location.href = '/';
-                } catch (err) {
-                    showToast(`Failed to delete: ${err.message}`, 'error');
-                }
+            deleteBtn.addEventListener('click', () => {
+                window.showConfirmModal({
+                    title: 'Delete Meeting?',
+                    message: 'This meeting and its summary will be permanently removed.',
+                    confirmText: 'Delete',
+                    isDanger: true,
+                    onConfirm: async () => {
+                        try {
+                            await api(`/api/recordings/${window.MEETING_ID}`, { method: 'DELETE' });
+                            window.location.href = '/';
+                        } catch (err) {
+                            showToast(`Failed to delete: ${err.message}`, 'error');
+                        }
+                    },
+                });
             });
         }
 
