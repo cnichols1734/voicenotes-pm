@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <meta name="description" content="VoiceNotez - Meeting intelligence for tech teams" />
   <title>{% block title %}VoiceNotez{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}?v={{ cache_bust }}" />
 </head>
 
 <body>
@@ -130,12 +130,12 @@
   </div>
 
   <!-- JavaScript modules -->
-  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/folders.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/meetings.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/recorder.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/prompt_editor.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}?v={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', filename='js/folders.js') }}?v={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', filename='js/meetings.js') }}?v={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', filename='js/recorder.js') }}?v={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', filename='js/prompt_editor.js') }}?v={{ cache_bust }}"></script>
+  <script src="{{ url_for('static', filename='js/chat.js') }}?v={{ cache_bust }}"></script>
   <script src="https://unpkg.com/lucide@latest"></script>
   {% block scripts %}{% endblock %}
 
