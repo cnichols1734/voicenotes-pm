@@ -513,8 +513,10 @@ select {
   color: var(--text-primary);
 }
 
-.meeting-card:hover {
-  border-color: var(--border-default);
+@media (hover: hover) {
+  .meeting-card:hover {
+    border-color: var(--border-default);
+  }
 }
 
 .meeting-card-header {
@@ -3052,8 +3054,10 @@ html {
   transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast) !important;
 }
 
-.meeting-card:hover .card-delete-btn {
-  opacity: 1;
+@media (hover: hover) {
+  .meeting-card:hover .card-delete-btn {
+    opacity: 1;
+  }
 }
 
 .card-delete-btn:hover {
