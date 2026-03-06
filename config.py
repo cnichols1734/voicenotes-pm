@@ -17,7 +17,6 @@ class Config:
     OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "minimax/minimax-m2.5")
     LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "")  # e.g. https://your-tunnel.trycloudflare.com/v1
     LLM_MODEL = os.environ.get("LLM_MODEL", "qwen3.5-4b")  # model loaded in LM Studio
-    MOBILE_API_KEY = os.environ.get("MOBILE_API_KEY", "")
     MOBILE_ACCESS_TOKEN_TTL_SECONDS = int(
         os.environ.get("MOBILE_ACCESS_TOKEN_TTL_SECONDS", "3600")
     )

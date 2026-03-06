@@ -12,6 +12,8 @@ env/
 .env
 .env.local
 .env.*.local
+.hf_token
+.railway-sync.json
 
 # IDE
 .idea/
@@ -31,3 +33,7 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local AI dependencies / sibling projects
+whisper.cpp/
+voicenotes-pm/
