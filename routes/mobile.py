@@ -77,7 +77,7 @@ def summarize():
         return jsonify({"error": "transcript and prompt_template are required"}), 400
 
     try:
-        summary = summarize_transcript(transcript, prompt_template)
+        summary = summarize_transcript(transcript, prompt_template, schema="mobile")
         return jsonify({"summary": summary})
     except Exception as exc:
         logger.error("Mobile summarization failed: %s", exc)
