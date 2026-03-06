@@ -18,6 +18,15 @@ class Config:
     LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "")  # e.g. https://your-tunnel.trycloudflare.com/v1
     LLM_MODEL = os.environ.get("LLM_MODEL", "qwen3.5-4b")  # model loaded in LM Studio
     MOBILE_API_KEY = os.environ.get("MOBILE_API_KEY", "")
+    MOBILE_ACCESS_TOKEN_TTL_SECONDS = int(
+        os.environ.get("MOBILE_ACCESS_TOKEN_TTL_SECONDS", "3600")
+    )
+    MOBILE_REFRESH_TOKEN_TTL_DAYS = int(
+        os.environ.get("MOBILE_REFRESH_TOKEN_TTL_DAYS", "45")
+    )
+    MOBILE_ACCESS_TOKEN_SALT = os.environ.get(
+        "MOBILE_ACCESS_TOKEN_SALT", "mobile-access-token"
+    )
     MAX_CONTENT_LENGTH = 200 * 1024 * 1024  # 200 MB max upload (Flask will 413 anything larger)
     SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-key-change-in-production")
     FLASK_ENV = os.environ.get("FLASK_ENV", "development")
