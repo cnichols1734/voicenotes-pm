@@ -50,9 +50,9 @@ def _build_system_prompt(meeting: dict) -> str:
     else:
         summary_text = json.dumps(summary, indent=2)
 
-    meeting_type = ""
+    meeting_type = (meeting.get("meeting_type") or "").strip()
     type_id = meeting.get("meeting_type_id")
-    if type_id:
+    if type_id and not meeting_type:
         try:
             sb = get_supabase()
             result = sb.table("meeting_types").select("name").eq("id", type_id).execute()
