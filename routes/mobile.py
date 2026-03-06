@@ -2,17 +2,16 @@
 VoiceNotes PM - Stateless mobile API routes.
 
 These endpoints let the iOS app use the same AI backend stack as the web app
-without requiring Supabase meeting records or session auth.
+without requiring Supabase meeting records or browser session auth.
 """
-import hmac
 import json
 import logging
 from functools import wraps
 
-from flask import Blueprint, Response, jsonify, request, stream_with_context
+from flask import Blueprint, Response, g, jsonify, request, stream_with_context
 
-from config import Config
 from services.chat_service import stream_chat_response
+from services.mobile_auth_service import authenticate_mobile_access_token
 from services.summarizer_service import summarize_transcript
 from services.title_service import generate_title
 from services.whisper_service import transcribe_audio
@@ -22,20 +21,26 @@ logger = logging.getLogger(__name__)
 mobile_bp = Blueprint("mobile", __name__, url_prefix="/api/mobile")
 
 
-def require_api_key(func):
-    """Protect mobile routes with a shared API key."""
+def require_mobile_auth(func):
+    """Protect mobile routes with bearer auth."""
 
     @wraps(func)
     def wrapper(*args, **kwargs):
-        expected = Config.MOBILE_API_KEY.strip()
-        provided = (request.headers.get("X-API-Key") or "").strip()
+        header = (request.headers.get("Authorization") or "").strip()
+        if not header.startswith("Bearer "):
+            return jsonify({"error": "Missing bearer token."}), 401
 
-        if not expected:
-            logger.error("MOBILE_API_KEY is not configured.")
-            return jsonify({"error": "Mobile API is not configured"}), 503
+        token = header[7:].strip()
+        if not token:
+            return jsonify({"error": "Missing bearer token."}), 401
 
-        if not provided or not hmac.compare_digest(provided, expected):
-            return jsonify({"error": "Invalid API key"}), 401
+        try:
+            user, session = authenticate_mobile_access_token(token)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 401
+
+        g.mobile_user = user
+        g.mobile_session = session
 
         return func(*args, **kwargs)
 
@@ -43,7 +48,7 @@ def require_api_key(func):
 
 
 @mobile_bp.route("/transcribe", methods=["POST"])
-@require_api_key
+@require_mobile_auth
 def transcribe():
     """Transcribe a mobile-uploaded audio blob and return text."""
     if "audio" not in request.files:
@@ -66,7 +71,7 @@ def transcribe():
 
 
 @mobile_bp.route("/summarize", methods=["POST"])
-@require_api_key
+@require_mobile_auth
 def summarize():
     """Summarize a transcript using the shared backend LLM stack."""
     data = request.get_json(force=True) or {}
@@ -77,7 +82,7 @@ def summarize():
         return jsonify({"error": "transcript and prompt_template are required"}), 400
 
     try:
-        summary = summarize_transcript(transcript, prompt_template)
+        summary = summarize_transcript(transcript, prompt_template, schema="mobile")
         return jsonify({"summary": summary})
     except Exception as exc:
         logger.error("Mobile summarization failed: %s", exc)
@@ -89,7 +94,7 @@ def summarize():
 
 
 @mobile_bp.route("/generate-title", methods=["POST"])
-@require_api_key
+@require_mobile_auth
 def generate_meeting_title():
     """Generate a title for a transcript without a database meeting record."""
     data = request.get_json(force=True) or {}
@@ -107,7 +112,7 @@ def generate_meeting_title():
 
 
 @mobile_bp.route("/chat", methods=["POST"])
-@require_api_key
+@require_mobile_auth
 def chat():
     """Stream a meeting chat response without persisting anything server-side."""
     data = request.get_json(force=True) or {}
@@ -139,6 +144,11 @@ def chat():
 
     def generate():
         try:
+            logger.info(
+                "Mobile chat request user_id=%s session_id=%s",
+                getattr(g.mobile_user, "id", "unknown"),
+                g.mobile_session.get("id"),
+            )
             for chunk in stream_chat_response(meeting, history, message):
                 yield f"data: {json.dumps(chunk)}\n\n"
         except RuntimeError as exc:
