@@ -287,7 +287,7 @@ def summarize_recording():
         return jsonify({
             "error": "Summarization failed",
             "detail": str(exc),
-            "hint": "If the free model is unavailable, update OPENROUTER_MODEL in /api/settings/model",
+            "hint": "If the configured model is unavailable, update OPENROUTER_MODEL in /api/settings/model",
         }), 502
 
     # Save results

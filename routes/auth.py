@@ -120,8 +120,14 @@ def register_submit():
         return redirect(url_for("auth.login_page"))
 
     except Exception as exc:
-        logger.error("Registration failed: %s", exc)
-        flash("Registration failed. Please try again.", "error")
+        logger.error("Registration failed: %s", exc, exc_info=True)
+        detail = str(exc)
+        if "row-level security" in detail.lower() or "policy" in detail.lower() or "permission" in detail.lower():
+            flash("Database permission error — the Supabase key may need to be the service_role key, not the anon key.", "error")
+        elif "duplicate" in detail.lower() or "unique" in detail.lower():
+            flash("An account with that email already exists.", "error")
+        else:
+            flash(f"Registration failed: {detail}", "error")
         return render_template("register.html"), 500
 
 

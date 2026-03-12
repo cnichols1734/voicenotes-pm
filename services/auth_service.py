@@ -68,6 +68,11 @@ def create_user(
         )
         .execute()
     )
+    if not result.data:
+        raise RuntimeError(
+            "Insert returned no data — this usually means Row Level Security (RLS) "
+            "is blocking the operation. Use the service_role key instead of the anon key."
+        )
     return User(result.data[0])
 
 

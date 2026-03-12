@@ -499,7 +499,7 @@ def summarize_transcript(transcript: str, prompt_template: str, schema: str = "w
 
     Strategy:
       1. If LLM_BASE_URL is configured, try local LM Studio (Qwen) first.
-      2. If local fails, fall back to OpenRouter (Minimax).
+      2. If local fails, fall back to OpenRouter.
       3. If no local URL, go straight to OpenRouter.
 
     Returns a structured summary dict.
@@ -530,7 +530,7 @@ def summarize_transcript(transcript: str, prompt_template: str, schema: str = "w
         except requests.RequestException as exc:
             raise RuntimeError(
                 f"OpenRouter API request failed: {exc}. "
-                "If the free model is unavailable, try updating OPENROUTER_MODEL in settings."
+                "If the configured model is unavailable, try updating OPENROUTER_MODEL in settings."
             ) from exc
 
     logger.debug("LLM raw response: %s", raw_content[:500] if raw_content else "(empty)")
