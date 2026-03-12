@@ -8,7 +8,7 @@ AI-powered voice recording and meeting summarization tool for Technical Product 
 - **Database:** Supabase (PostgreSQL with UUID, JSONB)
 - **Auth:** Flask-Login + bcrypt
 - **Transcription:** OpenAI Whisper API (`whisper-1`)
-- **Summarization:** OpenRouter API (default model: `minimax/minimax-m2.5`)
+- **Summarization:** OpenRouter API (default model: `deepseek/deepseek-v3.2`)
 - **Audio:** pydub + ffmpeg (chunking for files >24MB)
 - **Frontend:** Jinja2 templates, vanilla JS, Web Audio API, Canvas waveform visualization
 - **Deployment:** Railway.app via Nixpacks
@@ -64,7 +64,7 @@ Required in `.env` (see `.env.example`):
 - `SECRET_KEY` — Flask session secret
 - `FLASK_ENV` — `development` or `production`
 - `ADMIN_EMAIL` — First registered user with this email becomes admin
-- `OPENROUTER_MODEL` — Optional, defaults to `minimax/minimax-m2.5`
+- `OPENROUTER_MODEL` — Optional, defaults to `deepseek/deepseek-v3.2`
 
 ## Architecture & Patterns
 

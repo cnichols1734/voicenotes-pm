@@ -1807,6 +1807,16 @@ select {
 
   .content-header {
     padding: 16px;
+    gap: 8px;
+  }
+
+  .search-input-wrapper {
+    min-width: 0;
+  }
+
+  .sort-select {
+    padding: 0 8px;
+    font-size: 12px;
   }
 
   .detail-page {

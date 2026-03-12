@@ -14,7 +14,7 @@ class Config:
     WHISPER_BASE_URL = os.environ.get("WHISPER_BASE_URL", "")  # e.g. http://localhost:8178 or https://your-tunnel.trycloudflare.com
     WHISPER_API_KEY = os.environ.get("WHISPER_API_KEY", "lm-studio")  # LM Studio doesn't need a real key
     OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-    OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "minimax/minimax-m2.5")
+    OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-v3.2")
     LLM_BASE_URL = os.environ.get("LLM_BASE_URL", "")  # e.g. https://your-tunnel.trycloudflare.com/v1
     LLM_MODEL = os.environ.get("LLM_MODEL", "qwen3.5-4b")  # model loaded in LM Studio
     MOBILE_API_KEY = os.environ.get("MOBILE_API_KEY", "")
