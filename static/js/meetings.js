@@ -933,6 +933,107 @@ window.MeetingsModule = (() => {
                 }
             });
         }
+
+        // Share button
+        initShareButton();
+    }
+
+    // ---------------------------------------------------------------------------
+    // Share link management
+    // ---------------------------------------------------------------------------
+    function initShareButton() {
+        const shareBtn = getEl('share-btn');
+        const popover = getEl('share-popover');
+        const wrapper = getEl('share-btn-wrapper');
+        const linkInput = getEl('share-link-input');
+        const copyLinkBtn = getEl('copy-share-link-btn');
+        const revokeBtn = getEl('revoke-share-btn');
+
+        if (!shareBtn || !popover) return;
+
+        let shareId = null;
+        let popoverOpen = false;
+
+        // Check existing share status on load
+        loadShareStatus();
+
+        async function loadShareStatus() {
+            try {
+                const data = await api(`/api/recordings/${window.MEETING_ID}/share`);
+                if (data.share_id && data.is_active) {
+                    shareId = data.share_id;
+                    shareBtn.classList.add('share-active');
+                }
+            } catch (_) { /* ignore */ }
+        }
+
+        function togglePopover() {
+            popoverOpen = !popoverOpen;
+            if (popoverOpen) {
+                openPopover();
+            } else {
+                popover.classList.remove('visible');
+            }
+        }
+
+        async function openPopover() {
+            if (!shareId) {
+                try {
+                    const data = await api(`/api/recordings/${window.MEETING_ID}/share`, { method: 'POST' });
+                    shareId = data.share_id;
+                    shareBtn.classList.add('share-active');
+                } catch (err) {
+                    showToast(`Failed to create share link: ${err.message}`, 'error');
+                    return;
+                }
+            }
+            linkInput.value = window.location.origin + '/share/' + shareId;
+            popover.classList.add('visible');
+            revokeBtn.style.display = '';
+        }
+
+        shareBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            togglePopover();
+        });
+
+        if (copyLinkBtn) {
+            copyLinkBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                try {
+                    await navigator.clipboard.writeText(linkInput.value);
+                    copyLinkBtn.textContent = 'Copied!';
+                    setTimeout(() => { copyLinkBtn.textContent = 'Copy'; }, 2000);
+                } catch (_) {
+                    linkInput.select();
+                    showToast('Press Ctrl+C to copy.', 'info');
+                }
+            });
+        }
+
+        if (revokeBtn) {
+            revokeBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                try {
+                    await api(`/api/recordings/${window.MEETING_ID}/share`, { method: 'DELETE' });
+                    shareId = null;
+                    shareBtn.classList.remove('share-active');
+                    popover.classList.remove('visible');
+                    popoverOpen = false;
+                    showToast('Share link revoked.', 'success');
+                } catch (err) {
+                    showToast(`Failed to revoke: ${err.message}`, 'error');
+                }
+            });
+        }
+
+        // Close popover on outside click
+        document.addEventListener('click', (e) => {
+            if (popoverOpen && wrapper && !wrapper.contains(e.target)) {
+                popover.classList.remove('visible');
+                popoverOpen = false;
+            }
+        });
     }
 
     // ---------------------------------------------------------------------------

@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Link Not Found - VoiceNotez</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+</head>
+<body>
+    <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;">
+        <div style="margin-bottom:24px;color:var(--text-tertiary);opacity:0.4;">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+        </div>
+        <h1 style="font-size:24px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">Link Not Found</h1>
+        <p style="font-size:15px;color:var(--text-secondary);max-width:360px;line-height:1.6;">
+            This share link doesn't exist or has been revoked by the meeting owner.
+        </p>
+        <a href="/" style="margin-top:24px;color:var(--accent-primary);font-weight:600;font-size:14px;">Go to VoiceNotez</a>
+    </div>
+</body>
+</html>

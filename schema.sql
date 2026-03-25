@@ -243,6 +243,21 @@ CREATE INDEX idx_chat_messages_meeting ON chat_messages(meeting_id, created_at);
 CREATE INDEX idx_chat_messages_user ON chat_messages(user_id);
 
 -- ============================================
+-- SHARED LINKS
+-- Public read-only share tokens for meetings
+-- ============================================
+CREATE TABLE shared_links (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX idx_shared_links_meeting ON shared_links(meeting_id);
+CREATE INDEX idx_shared_links_user ON shared_links(user_id);
+
+-- ============================================
 -- NOTE: Default meeting types are seeded per-user
 -- on first registration via services/seed_defaults.py
 -- ============================================
