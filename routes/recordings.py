@@ -2,6 +2,7 @@
 VoiceNotes PM - Recordings CRUD + upload/transcribe/summarize routes.
 """
 import logging
+import uuid
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 recordings_bp = Blueprint("recordings", __name__, url_prefix="/api/recordings")
 
 MAX_AUDIO_BYTES = 100 * 1024 * 1024  # 100 MB hard limit
+# Dashboard search: bound length to keep queries predictable (DB still uses trigram indexes)
+MAX_MEETING_SEARCH_LEN = 200
 
 
 def _supabase_error(message, status=503):
@@ -29,26 +32,37 @@ def _supabase_error(message, status=503):
 @recordings_bp.route("/", methods=["GET"])
 @login_required
 def list_recordings():
-    """List all meetings for the current user, with optional filters."""
+    """
+    List meetings for the current user (dashboard).
+
+    Uses Postgres RPC list_user_meetings: omits transcript from the payload for
+    bandwidth, and applies optional q= search across title + transcript with
+    pg_trgm-backed ILIKE (see migration_meeting_search.sql).
+    """
     try:
         supabase = get_supabase()
-        query = (
-            supabase.table("meetings")
-            .select("*")
-            .eq("user_id", str(current_user.id))
-            .order("recorded_at", desc=True)
-        )
 
-        folder_id = request.args.get("folder_id")
-        meeting_type_id = request.args.get("meeting_type_id")
+        folder_id = request.args.get("folder_id") or None
+        meeting_type_id = request.args.get("meeting_type_id") or None
+        search_q = (request.args.get("q") or "").strip()
+        if len(search_q) > MAX_MEETING_SEARCH_LEN:
+            search_q = search_q[:MAX_MEETING_SEARCH_LEN]
 
-        if folder_id:
-            query = query.eq("folder_id", folder_id)
-        if meeting_type_id:
-            query = query.eq("meeting_type_id", meeting_type_id)
+        for name, raw in (("folder_id", folder_id), ("meeting_type_id", meeting_type_id)):
+            if raw:
+                try:
+                    uuid.UUID(str(raw))
+                except ValueError:
+                    return jsonify({"error": f"Invalid {name}"}), 400
 
-        result = query.execute()
-        return jsonify({"meetings": result.data})
+        rpc_params = {
+            "p_user_id": str(current_user.id),
+            "p_folder_id": folder_id,
+            "p_meeting_type_id": meeting_type_id,
+            "p_search": search_q if search_q else None,
+        }
+        result = supabase.rpc("list_user_meetings", rpc_params).execute()
+        return jsonify({"meetings": result.data or []})
     except Exception as exc:
         logger.error("Failed to list recordings: %s", exc)
         return _supabase_error(f"Failed to fetch meetings: {exc}")

@@ -7,6 +7,9 @@ window.MeetingsModule = (() => {
     let allMeetings = [];
     let currentMeeting = null; // module-scoped for action item persistence
     let openSwipeRow = null;   // track the currently-open swipe row
+    let fetchGeneration = 0;   // ignore stale list responses when search input changes quickly
+    let searchDebounceTimer = null;
+    const SEARCH_DEBOUNCE_MS = 320;
 
     function getEl(id) { return document.getElementById(id); }
 
@@ -23,20 +26,34 @@ window.MeetingsModule = (() => {
         const params = new URLSearchParams();
         if (state.currentFolderFilter) params.set('folder_id', state.currentFolderFilter);
         if (state.currentTypeFilter) params.set('meeting_type_id', state.currentTypeFilter);
+        const q = (state.searchQuery || '').trim();
+        if (q) params.set('q', q);
 
+        const gen = ++fetchGeneration;
         try {
             const data = await api(`/api/recordings?${params.toString()}`);
+            if (gen !== fetchGeneration) return;
+
             allMeetings = data.meetings || [];
 
-            // Update all-meetings count
+            // Sidebar total should not shrink while searching (list is filtered server-side)
             const countEl = getEl('all-meetings-count');
-            if (countEl) countEl.textContent = allMeetings.length;
+            if (countEl && !q) countEl.textContent = allMeetings.length;
 
             renderMeetings(allMeetings);
         } catch (err) {
+            if (gen !== fetchGeneration) return;
             console.error('Failed to load meetings:', err);
             showToast('Failed to load meetings.', 'error');
         }
+    }
+
+    function scheduleReloadForSearch() {
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(() => {
+            searchDebounceTimer = null;
+            reload();
+        }, SEARCH_DEBOUNCE_MS);
     }
 
     // ---------------------------------------------------------------------------
@@ -56,28 +73,34 @@ window.MeetingsModule = (() => {
         // Remove existing cards
         list.querySelectorAll('.swipe-row').forEach(el => el.remove());
 
-        // Apply search
-        const query = window.AppState.searchQuery.toLowerCase();
-        let filtered = query
-            ? meetings.filter(m => m.title.toLowerCase().includes(query))
-            : meetings;
-
-        // Apply sort
+        // Search is server-side (title + transcript); this list is already filtered.
         const sort = window.AppState.sortOrder;
-        filtered = [...filtered].sort((a, b) => {
+        const sorted = [...meetings].sort((a, b) => {
             if (sort === 'oldest') return new Date(a.recorded_at) - new Date(b.recorded_at);
             if (sort === 'alpha') return a.title.localeCompare(b.title);
             return new Date(b.recorded_at) - new Date(a.recorded_at); // newest first (default)
         });
 
-        if (filtered.length === 0) {
-            if (empty) empty.style.display = 'flex';
+        if (sorted.length === 0) {
+            if (empty) {
+                const q = (window.AppState.searchQuery || '').trim();
+                const titleEl = empty.querySelector('.empty-state-title');
+                const descEl = empty.querySelector('.empty-state-desc');
+                if (q && titleEl && descEl) {
+                    titleEl.textContent = 'No matches';
+                    descEl.textContent = 'Try different words or clear the search box.';
+                } else if (titleEl && descEl) {
+                    titleEl.textContent = 'No meetings yet';
+                    descEl.textContent = 'Hit the record button to capture your first meeting.';
+                }
+                empty.style.display = 'flex';
+            }
             return;
         }
         if (empty) empty.style.display = 'none';
 
         const types = window.AppState.meetingTypes || [];
-        filtered.forEach(meeting => {
+        sorted.forEach(meeting => {
             const row = buildMeetingCard(meeting, types);
             list.appendChild(row);
         });
@@ -436,7 +459,7 @@ window.MeetingsModule = (() => {
         if (searchInput) {
             searchInput.addEventListener('input', () => {
                 window.AppState.searchQuery = searchInput.value;
-                renderMeetings(allMeetings);
+                scheduleReloadForSearch();
             });
         }
 
