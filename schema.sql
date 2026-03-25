@@ -105,6 +105,81 @@ CREATE INDEX idx_meetings_meeting_type_id ON meetings(meeting_type_id);
 CREATE INDEX idx_meetings_status ON meetings(status);
 CREATE INDEX idx_meetings_recorded_at ON meetings(recorded_at DESC);
 
+-- Substring search on title + transcript (dashboard); requires pg_trgm
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE INDEX idx_meetings_title_trgm ON meetings USING GIN (title gin_trgm_ops);
+CREATE INDEX idx_meetings_transcript_trgm ON meetings USING GIN (transcript gin_trgm_ops);
+
+CREATE OR REPLACE FUNCTION escape_like_pattern(p_text text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+AS $$
+  SELECT replace(replace(replace(COALESCE(p_text, ''), E'\\', E'\\\\'), E'%', E'\%'), E'_', E'\_');
+$$;
+
+CREATE OR REPLACE FUNCTION list_user_meetings(
+  p_user_id uuid,
+  p_folder_id uuid DEFAULT NULL,
+  p_meeting_type_id uuid DEFAULT NULL,
+  p_search text DEFAULT NULL
+)
+RETURNS TABLE (
+  id uuid,
+  title text,
+  folder_id uuid,
+  meeting_type_id uuid,
+  summary jsonb,
+  duration_seconds integer,
+  status text,
+  error_message text,
+  recorded_at timestamptz,
+  created_at timestamptz,
+  updated_at timestamptz
+)
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public
+AS $$
+  SELECT
+    m.id,
+    m.title,
+    m.folder_id,
+    m.meeting_type_id,
+    m.summary,
+    m.duration_seconds,
+    m.status,
+    m.error_message,
+    m.recorded_at,
+    m.created_at,
+    m.updated_at
+  FROM meetings m
+  WHERE m.user_id = p_user_id
+    AND (p_folder_id IS NULL OR m.folder_id = p_folder_id)
+    AND (p_meeting_type_id IS NULL OR m.meeting_type_id = p_meeting_type_id)
+    AND (
+      p_search IS NULL
+      OR length(trim(p_search)) = 0
+      OR (
+        m.title ILIKE (
+          '%' || escape_like_pattern(trim(p_search)) || '%'
+        ) ESCAPE '\'
+        OR (
+          m.transcript IS NOT NULL
+          AND m.transcript ILIKE (
+            '%' || escape_like_pattern(trim(p_search)) || '%'
+          ) ESCAPE '\'
+        )
+      )
+    )
+  ORDER BY m.recorded_at DESC;
+$$;
+
+GRANT EXECUTE ON FUNCTION list_user_meetings(uuid, uuid, uuid, text) TO service_role;
+
 -- ============================================
 -- UPDATED_AT TRIGGER
 -- Auto-update updated_at on row changes
