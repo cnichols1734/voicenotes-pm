@@ -2638,7 +2638,8 @@ mark.search-highlight {
     gap: 6px;
   }
 
-  .detail-actions-right .btn {
+  .detail-actions-right > .btn,
+  .detail-actions-right > .share-btn-wrapper > .btn {
     flex: 0 0 auto;
     min-width: 0;
     padding: 0 10px;
@@ -2646,13 +2647,15 @@ mark.search-highlight {
     gap: 0;
   }
 
-  .detail-actions-right .btn i,
-  .detail-actions-right .btn svg {
+  .detail-actions-right > .btn i,
+  .detail-actions-right > .btn svg,
+  .detail-actions-right > .share-btn-wrapper > .btn i,
+  .detail-actions-right > .share-btn-wrapper > .btn svg {
     width: 15px !important;
     height: 15px !important;
   }
 
-  .detail-actions-right .btn.btn-danger {
+  .detail-actions-right > .btn.btn-danger {
     margin-left: auto;
   }
 }
