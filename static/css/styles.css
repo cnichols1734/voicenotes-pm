@@ -2633,9 +2633,27 @@ mark.search-highlight {
 }
 
 @media (max-width: 480px) {
+  .detail-actions-right {
+    display: flex;
+    gap: 6px;
+  }
+
   .detail-actions-right .btn {
-    flex: 1;
+    flex: 0 0 auto;
     min-width: 0;
+    padding: 0 10px;
+    font-size: 0;
+    gap: 0;
+  }
+
+  .detail-actions-right .btn i,
+  .detail-actions-right .btn svg {
+    width: 15px !important;
+    height: 15px !important;
+  }
+
+  .detail-actions-right .btn.btn-danger {
+    margin-left: auto;
   }
 }
 
@@ -3603,5 +3621,90 @@ html {
   .shared-nav-badge {
     font-size: 11px;
     padding: 3px 8px;
+  }
+}
+
+/* Shared page CTA */
+.shared-cta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: rgba(10, 132, 255, 0.06);
+  border: 1px solid rgba(10, 132, 255, 0.12);
+  border-radius: var(--radius-full);
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 90;
+  text-decoration: none;
+  transition: all var(--transition-default);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
+.shared-cta:hover {
+  background: rgba(10, 132, 255, 0.12);
+  border-color: rgba(10, 132, 255, 0.25);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+}
+
+.shared-cta-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--accent-primary);
+  flex-shrink: 0;
+}
+
+.shared-cta-icon svg {
+  color: #fff;
+}
+
+.shared-cta-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.shared-cta-text strong {
+  color: var(--accent-primary);
+  font-weight: 700;
+}
+
+.shared-cta-dismiss {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-radius: 50%;
+  flex-shrink: 0;
+  padding: 0;
+  margin-left: 2px;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.shared-cta-dismiss:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+@media (max-width: 480px) {
+  .shared-cta {
+    bottom: 12px;
+    right: 12px;
+    left: 12px;
+    justify-content: center;
   }
 }
