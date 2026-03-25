@@ -57,6 +57,7 @@ def create_app():
     from routes.api import api_bp
     from routes.admin import admin_bp
     from routes.chat import chat_bp
+    from routes.share import share_bp
     from routes.mobile import mobile_bp
     from routes.mobile_auth import mobile_auth_bp
 
@@ -68,6 +69,7 @@ def create_app():
     app.register_blueprint(api_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(chat_bp)
+    app.register_blueprint(share_bp)
     app.register_blueprint(mobile_bp)
     app.register_blueprint(mobile_auth_bp)
 
