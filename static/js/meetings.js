@@ -905,14 +905,14 @@ window.MeetingsModule = (() => {
             });
         }
 
-        // Copy summary
+        // Copy summary as Markdown
         const copySummaryBtn = getEl('copy-summary-btn');
         if (copySummaryBtn) {
             copySummaryBtn.addEventListener('click', async () => {
-                const content = document.getElementById('summary-content');
-                if (!content) return;
+                if (!currentMeeting || !currentMeeting.summary) return;
+                const md = buildSummaryMarkdown(currentMeeting);
                 try {
-                    await navigator.clipboard.writeText(content.innerText || '');
+                    await navigator.clipboard.writeText(md);
                     showToast('Summary copied to clipboard.', 'success');
                 } catch (e) {
                     showToast('Could not copy. Please select and copy manually.', 'error');
@@ -933,6 +933,81 @@ window.MeetingsModule = (() => {
                 }
             });
         }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Markdown copy
+    // ---------------------------------------------------------------------------
+    function buildSummaryMarkdown(meeting) {
+        const s = meeting.summary || {};
+        const lines = [];
+
+        lines.push(`# ${meeting.title}`);
+        lines.push('');
+
+        const meta = [];
+        if (meeting.recorded_at) meta.push(`**Date:** ${formatDate(meeting.recorded_at)}`);
+        if (meeting.duration_seconds) meta.push(`**Duration:** ${formatDuration(meeting.duration_seconds)}`);
+        const types = window.AppState.meetingTypes || [];
+        const type = types.find(t => t.id === meeting.meeting_type_id);
+        if (type) meta.push(`**Type:** ${type.name}`);
+        if (meta.length) {
+            lines.push(meta.join('  ·  '));
+            lines.push('');
+        }
+
+        lines.push('---');
+        lines.push('');
+
+        if (s.executive_summary) {
+            lines.push('## Executive Summary');
+            lines.push('');
+            lines.push(s.executive_summary.trim());
+            lines.push('');
+        }
+
+        if (s.action_items && s.action_items.length) {
+            lines.push('## Action Items');
+            lines.push('');
+            s.action_items.forEach(item => {
+                const check = item.completed ? 'x' : ' ';
+                let line = `- [${check}] ${item.task}`;
+                const tags = [];
+                if (item.owner) tags.push(`@${item.owner}`);
+                if (item.deadline) tags.push(`📅 ${item.deadline}`);
+                if (item.priority) tags.push(`🔺 ${item.priority}`);
+                if (tags.length) line += `  —  ${tags.join('  ·  ')}`;
+                lines.push(line);
+            });
+            lines.push('');
+        }
+
+        if (s.decisions_made && s.decisions_made.length) {
+            lines.push('## Decisions Made');
+            lines.push('');
+            s.decisions_made.forEach(d => {
+                lines.push(`- **${d.decision}**`);
+                if (d.context) lines.push(`  ${d.context}`);
+                if (d.decided_by) lines.push(`  *Decided by: ${d.decided_by}*`);
+            });
+            lines.push('');
+        }
+
+        if (s.key_discussion_points && s.key_discussion_points.length) {
+            lines.push('## Key Discussion Points');
+            lines.push('');
+            s.key_discussion_points.forEach(p => lines.push(`- ${p}`));
+            lines.push('');
+        }
+
+        if (s.follow_ups && s.follow_ups.length) {
+            lines.push('## Follow-ups');
+            lines.push('');
+            s.follow_ups.forEach(f => lines.push(`- ${f}`));
+            lines.push('');
+        }
+
+        return lines.join('\n');
     }
 
     // ---------------------------------------------------------------------------
