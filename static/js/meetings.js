@@ -113,9 +113,29 @@ window.MeetingsModule = (() => {
         const folders = window.AppState.folders || [];
         const folder = folders.find(f => f.id === meeting.folder_id);
         const summary = meeting.summary || {};
-        const preview = summary.executive_summary
-            ? (summary.executive_summary.length > 120 ? summary.executive_summary.slice(0, 120) + '...' : summary.executive_summary)
-            : '';
+        const q = (window.AppState.searchQuery || '').trim();
+
+        // Title: highlight matches when searching
+        const titleHtml = q ? highlightText(meeting.title, q) : escapeHtml(meeting.title);
+
+        // Preview: prefer transcript snippet (transcript-only match) over exec summary
+        let previewHtml = '';
+        if (meeting.search_snippet) {
+            // Transcript hit — show excerpt with ellipsis and a subtle label
+            previewHtml = `
+              <div class="meeting-card-preview meeting-card-preview--snippet">
+                <span class="snippet-label">transcript</span>…${highlightText(meeting.search_snippet, q)}…
+              </div>`;
+        } else {
+            const exec = summary.executive_summary
+                ? (summary.executive_summary.length > 120
+                    ? summary.executive_summary.slice(0, 120) + '…'
+                    : summary.executive_summary)
+                : '';
+            if (exec) {
+                previewHtml = `<div class="meeting-card-preview">${q ? highlightText(exec, q) : escapeHtml(exec)}</div>`;
+            }
+        }
 
         // ── Swipe wrapper ────────────────────────────────────────────────────
         const wrapper = document.createElement('div');
@@ -146,14 +166,14 @@ window.MeetingsModule = (() => {
         card.innerHTML = `
           <div class="meeting-card-body">
             <div class="meeting-card-header">
-              <div class="meeting-card-title">${escapeHtml(meeting.title)}</div>
+              <div class="meeting-card-title">${titleHtml}</div>
             </div>
             <div class="meeting-card-meta">
               ${typeBadge}${folderBadge}
               <span class="badge-date">${formatDate(meeting.recorded_at)}</span>
               ${meeting.duration_seconds ? `<span class="badge-date">${formatDuration(meeting.duration_seconds)}</span>` : ''}
             </div>
-            ${preview ? `<div class="meeting-card-preview">${escapeHtml(preview)}</div>` : ''}
+            ${previewHtml}
           </div>
           <div class="meeting-card-actions">
             <button class="card-action-btn card-move-btn" title="Move to folder">
@@ -928,6 +948,26 @@ window.MeetingsModule = (() => {
     }
 
     window.escapeHtml = escapeHtml;
+
+    /**
+     * Escape HTML then wrap every case-insensitive occurrence of `query`
+     * in <mark class="search-highlight">…</mark>.
+     * Safe to inject as innerHTML.
+     */
+    function highlightText(rawText, rawQuery) {
+        const safe = escapeHtml(rawText || '');
+        if (!rawQuery) return safe;
+        // Escape the query for both HTML entities and regex special chars
+        const safeQuery = escapeHtml(rawQuery).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        try {
+            return safe.replace(
+                new RegExp(`(${safeQuery})`, 'gi'),
+                '<mark class="search-highlight">$1</mark>'
+            );
+        } catch (_) {
+            return safe;
+        }
+    }
 
     return { init, reload, initDetail };
 })();

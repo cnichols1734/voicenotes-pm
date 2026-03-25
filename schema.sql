@@ -137,7 +137,8 @@ RETURNS TABLE (
   error_message text,
   recorded_at timestamptz,
   created_at timestamptz,
-  updated_at timestamptz
+  updated_at timestamptz,
+  search_snippet text
 )
 LANGUAGE sql
 STABLE
@@ -155,7 +156,24 @@ AS $$
     m.error_message,
     m.recorded_at,
     m.created_at,
-    m.updated_at
+    m.updated_at,
+    -- NULL when no search or title matched (show executive_summary on client).
+    -- TEXT excerpt when transcript matched but title didn't.
+    CASE
+      WHEN p_search IS NOT NULL
+           AND length(trim(p_search)) > 0
+           AND m.transcript IS NOT NULL
+           AND NOT (m.title ILIKE ('%' || escape_like_pattern(trim(p_search)) || '%') ESCAPE '\')
+           AND       m.transcript ILIKE ('%' || escape_like_pattern(trim(p_search)) || '%') ESCAPE '\'
+      THEN trim(
+             substring(
+               m.transcript
+               FROM GREATEST(1, strpos(lower(m.transcript), lower(trim(p_search))) - 60)
+               FOR 200
+             )
+           )
+      ELSE NULL
+    END AS search_snippet
   FROM meetings m
   WHERE m.user_id = p_user_id
     AND (p_folder_id IS NULL OR m.folder_id = p_folder_id)
@@ -164,14 +182,10 @@ AS $$
       p_search IS NULL
       OR length(trim(p_search)) = 0
       OR (
-        m.title ILIKE (
-          '%' || escape_like_pattern(trim(p_search)) || '%'
-        ) ESCAPE '\'
+        m.title ILIKE ('%' || escape_like_pattern(trim(p_search)) || '%') ESCAPE '\'
         OR (
           m.transcript IS NOT NULL
-          AND m.transcript ILIKE (
-            '%' || escape_like_pattern(trim(p_search)) || '%'
-          ) ESCAPE '\'
+          AND m.transcript ILIKE ('%' || escape_like_pattern(trim(p_search)) || '%') ESCAPE '\'
         )
       )
     )

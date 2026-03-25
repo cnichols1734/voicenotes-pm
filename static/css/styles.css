@@ -554,6 +554,42 @@ select {
   overflow: hidden;
 }
 
+/* Transcript excerpt shown when search hits transcript but not title */
+.meeting-card-preview--snippet {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.snippet-label {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-primary);
+  background: var(--accent-primary-muted);
+  border-radius: var(--radius-full);
+  padding: 1px 6px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* Search term highlight inside card titles and previews */
+mark.search-highlight {
+  background: rgba(255, 214, 10, 0.22);
+  color: var(--accent-warning);
+  border-radius: 2px;
+  padding: 0 2px;
+  font-weight: 700;
+  font-style: inherit;
+}
+
 /* =====================================================
    Badges and Pills
    ===================================================== */
