@@ -17,6 +17,11 @@ window.MeetingsModule = (() => {
     const HEARTBEAT_INTERVAL_MS = 5000;
     const MAX_PRESENCE_BUBBLES = 4;
 
+    // Comments polling state
+    let commentsInterval = null;
+    let lastKnownCommentId = null;
+    const COMMENTS_POLL_MS = 5000;
+
     function getEl(id) { return document.getElementById(id); }
 
     // ---------------------------------------------------------------------------
@@ -532,6 +537,7 @@ window.MeetingsModule = (() => {
             }
 
             startPresencePolling(meetingId);
+            initComments(meetingId);
         } catch (err) {
             showToast(`Failed to load meeting: ${err.message}`, 'error');
         }
@@ -1708,6 +1714,202 @@ window.MeetingsModule = (() => {
                 }
             }
             countEl.textContent = `+${overflow}`;
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Comments
+    // ---------------------------------------------------------------------------
+
+    const COMMENT_COLORS = [
+        '#4A90D9', '#E85D75', '#50C878', '#F5A623', '#9B59B6',
+        '#1ABC9C', '#E74C3C', '#3498DB', '#2ECC71', '#E67E22',
+        '#8E44AD', '#16A085', '#D35400', '#2980B9', '#27AE60',
+    ];
+
+    function commentColorFor(name) {
+        let hash = 0;
+        for (let i = 0; i < name.length; i++) {
+            hash = ((hash << 5) - hash) + name.charCodeAt(i);
+            hash |= 0;
+        }
+        return COMMENT_COLORS[Math.abs(hash) % COMMENT_COLORS.length];
+    }
+
+    function commentInitials(name) {
+        const parts = name.trim().split(/\s+/);
+        if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+        return name.slice(0, 2).toUpperCase();
+    }
+
+    function commentTimeAgo(dateStr) {
+        const now = Date.now();
+        const then = new Date(dateStr).getTime();
+        const diff = Math.max(0, now - then);
+        const secs = Math.floor(diff / 1000);
+        if (secs < 10) return 'just now';
+        if (secs < 60) return secs + 's ago';
+        const mins = Math.floor(secs / 60);
+        if (mins < 60) return mins + 'm ago';
+        const hours = Math.floor(mins / 60);
+        if (hours < 24) return hours + 'h ago';
+        const days = Math.floor(hours / 24);
+        return days + 'd ago';
+    }
+
+    function renderCommentItem(c) {
+        const div = document.createElement('div');
+        div.className = 'comment-item';
+        div.dataset.commentId = c.id;
+        const color = commentColorFor(c.commenter_name);
+        const initials = commentInitials(c.commenter_name);
+        div.innerHTML =
+            '<div class="comment-header">' +
+                '<span class="comment-avatar" style="background:' + color + '">' + initials + '</span>' +
+                '<span class="comment-author">' + escapeHtml(c.commenter_name) + '</span>' +
+                '<span class="comment-time">' + commentTimeAgo(c.created_at) + '</span>' +
+            '</div>' +
+            '<div class="comment-body">' + c.content + '</div>';
+        return div;
+    }
+
+    function renderCommentsList(comments) {
+        const listEl = getEl('comments-list');
+        const emptyEl = getEl('comments-empty');
+        const countEl = getEl('comments-count');
+        if (!listEl) return;
+
+        if (countEl) countEl.textContent = comments.length;
+
+        if (comments.length === 0) {
+            if (emptyEl) emptyEl.style.display = '';
+            listEl.querySelectorAll('.comment-item').forEach(el => el.remove());
+            return;
+        }
+
+        if (emptyEl) emptyEl.style.display = 'none';
+
+        const existingIds = new Set();
+        listEl.querySelectorAll('.comment-item').forEach(el => existingIds.add(el.dataset.commentId));
+
+        const newIds = new Set(comments.map(c => c.id));
+        listEl.querySelectorAll('.comment-item').forEach(el => {
+            if (!newIds.has(el.dataset.commentId)) el.remove();
+        });
+
+        let shouldScroll = false;
+        comments.forEach(c => {
+            if (!existingIds.has(c.id)) {
+                const item = renderCommentItem(c);
+                item.classList.add('comment-new');
+                listEl.appendChild(item);
+                shouldScroll = true;
+            }
+        });
+
+        if (shouldScroll) {
+            listEl.scrollTop = listEl.scrollHeight;
+        }
+
+        // Update relative timestamps
+        listEl.querySelectorAll('.comment-item').forEach((el, i) => {
+            if (comments[i]) {
+                const timeEl = el.querySelector('.comment-time');
+                if (timeEl) timeEl.textContent = commentTimeAgo(comments[i].created_at);
+            }
+        });
+    }
+
+    function initComments(meetingId) {
+        const editor = getEl('comments-editor');
+        const sendBtn = getEl('comments-send-btn');
+        const toolbar = getEl('comments-toolbar');
+        if (!editor || !sendBtn) return;
+
+        // Toolbar commands
+        if (toolbar) {
+            toolbar.addEventListener('click', function (e) {
+                const btn = e.target.closest('button[data-cmd]');
+                if (!btn) return;
+                e.preventDefault();
+                document.execCommand(btn.dataset.cmd, false, null);
+                editor.focus();
+                updateToolbarState();
+            });
+        }
+
+        function updateToolbarState() {
+            if (!toolbar) return;
+            toolbar.querySelectorAll('button[data-cmd]').forEach(btn => {
+                const cmd = btn.dataset.cmd;
+                btn.classList.toggle('active', document.queryCommandState(cmd));
+            });
+        }
+
+        // Enable/disable send button based on editor content
+        function checkEditorContent() {
+            const hasContent = editor.textContent.trim().length > 0;
+            sendBtn.disabled = !hasContent;
+        }
+
+        editor.addEventListener('input', checkEditorContent);
+        editor.addEventListener('keyup', updateToolbarState);
+        editor.addEventListener('mouseup', updateToolbarState);
+
+        // Ctrl+Enter to post
+        editor.addEventListener('keydown', function (e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                if (!sendBtn.disabled) postComment(meetingId);
+            }
+        });
+
+        sendBtn.addEventListener('click', function () {
+            postComment(meetingId);
+        });
+
+        // Initial load
+        fetchComments(meetingId);
+
+        // Start polling
+        if (commentsInterval) clearInterval(commentsInterval);
+        commentsInterval = setInterval(() => fetchComments(meetingId), COMMENTS_POLL_MS);
+    }
+
+    async function fetchComments(meetingId) {
+        try {
+            const data = await api(`/api/recordings/${meetingId}/comments`);
+            const comments = data.comments || [];
+            const latestId = comments.length ? comments[comments.length - 1].id : null;
+            if (latestId !== lastKnownCommentId) {
+                lastKnownCommentId = latestId;
+                renderCommentsList(comments);
+            }
+        } catch (_) {
+            // Non-critical
+        }
+    }
+
+    async function postComment(meetingId) {
+        const editor = getEl('comments-editor');
+        const sendBtn = getEl('comments-send-btn');
+        if (!editor) return;
+
+        const content = editor.innerHTML.trim();
+        if (!content || content === '<br>') return;
+
+        sendBtn.disabled = true;
+        try {
+            await api(`/api/recordings/${meetingId}/comments`, {
+                method: 'POST',
+                body: JSON.stringify({ content: content }),
+            });
+            editor.innerHTML = '';
+            sendBtn.disabled = true;
+            await fetchComments(meetingId);
+        } catch (err) {
+            showToast('Failed to post comment: ' + err.message, 'error');
+            sendBtn.disabled = false;
         }
     }
 
