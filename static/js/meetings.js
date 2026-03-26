@@ -617,10 +617,21 @@ window.MeetingsModule = (() => {
     // ---------------------------------------------------------------------------
     // Action items: rendering, inline editing, add, history
     // ---------------------------------------------------------------------------
+    function formatDeadlineDisplay(raw) {
+        if (!raw || raw === 'TBD') return 'Set date';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+            const [y, m, d] = raw.split('-').map(Number);
+            const dt = new Date(y, m - 1, d);
+            return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+        return raw;
+    }
+
+    const PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent'];
+
     function renderActionItems(actionsEl, summary) {
         if (!summary.action_items || summary.action_items.length === 0) {
             actionsEl.innerHTML = '<p class="text-secondary">No action items recorded.</p>';
-            // Still show add button
             actionsEl.appendChild(buildAddActionItemBtn());
             updateActionItemsCount(summary.action_items || []);
             return;
@@ -629,8 +640,9 @@ window.MeetingsModule = (() => {
         actionsEl.innerHTML = summary.action_items.map((item, idx) => {
             const checked = item.completed ? ' checked' : '';
             const completedClass = item.completed ? ' completed' : '';
-            const priorityLabel = item.priority ? item.priority.charAt(0).toUpperCase() + item.priority.slice(1) : '';
-            const priorityClass = item.priority ? ` priority-${item.priority}` : '';
+            const prio = item.priority || 'medium';
+            const priorityLabel = prio.charAt(0).toUpperCase() + prio.slice(1);
+            const priorityClass = ` priority-${prio}`;
             const itemId = item.id || idx;
             return `
           <div class="action-item${completedClass}" data-item-id="${escapeHtml(String(itemId))}" data-index="${idx}">
@@ -639,8 +651,8 @@ window.MeetingsModule = (() => {
               <div class="action-task" data-index="${idx}">${escapeHtml(item.task)}</div>
               <div class="action-pills">
                 <span class="action-pill owner editable-pill" data-index="${idx}"><i data-lucide="user"></i> <span class="owner-text">${item.owner ? escapeHtml(item.owner) : 'Assign'}</span></span>
-                <span class="action-pill deadline editable-pill" data-index="${idx}"><i data-lucide="calendar"></i> <span class="deadline-text">${item.deadline ? escapeHtml(item.deadline) : 'Set date'}</span></span>
-                ${item.priority ? `<span class="action-pill priority-pill${priorityClass}">${priorityLabel}</span>` : ''}
+                <span class="action-pill deadline editable-pill" data-index="${idx}"><i data-lucide="calendar"></i> <span class="deadline-text">${formatDeadlineDisplay(item.deadline)}</span></span>
+                <span class="action-pill priority-pill editable-pill${priorityClass}" data-index="${idx}"><span class="priority-text">${priorityLabel}</span></span>
               </div>
             </div>
           </div>`;
@@ -660,38 +672,67 @@ window.MeetingsModule = (() => {
             });
         });
 
-        // Inline task text editing
+        // Task text editing — opens expandable textarea with save button
         actionsEl.querySelectorAll('.action-task').forEach(taskEl => {
             taskEl.addEventListener('click', () => {
-                if (taskEl.querySelector('.action-inline-input')) return;
+                if (taskEl.querySelector('.action-edit-area')) return;
                 const idx = parseInt(taskEl.dataset.index);
                 const item = summary.action_items[idx];
-                const input = document.createElement('input');
-                input.type = 'text';
-                input.className = 'action-inline-input';
-                input.value = item.task;
-                taskEl.textContent = '';
-                taskEl.appendChild(input);
-                input.focus();
-                input.select();
 
-                const save = () => {
-                    const val = input.value.trim();
+                const wrapper = document.createElement('div');
+                wrapper.className = 'action-edit-area';
+
+                const textarea = document.createElement('textarea');
+                textarea.className = 'action-edit-textarea';
+                textarea.value = item.task;
+                textarea.rows = Math.max(2, Math.ceil(item.task.length / 50));
+
+                const btnRow = document.createElement('div');
+                btnRow.className = 'action-edit-btns';
+                const saveBtn = document.createElement('button');
+                saveBtn.className = 'action-edit-save';
+                saveBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Save';
+                const cancelBtn = document.createElement('button');
+                cancelBtn.className = 'action-edit-cancel';
+                cancelBtn.textContent = 'Cancel';
+                btnRow.appendChild(cancelBtn);
+                btnRow.appendChild(saveBtn);
+
+                wrapper.appendChild(textarea);
+                wrapper.appendChild(btnRow);
+                taskEl.textContent = '';
+                taskEl.appendChild(wrapper);
+                textarea.focus();
+
+                const autoGrow = () => {
+                    textarea.style.height = 'auto';
+                    textarea.style.height = textarea.scrollHeight + 'px';
+                };
+                textarea.addEventListener('input', autoGrow);
+                setTimeout(autoGrow, 0);
+
+                saveBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const val = textarea.value.trim();
                     if (val && val !== item.task) {
                         item.task = val;
                         patchActionItem(item.id, { task: val });
                     }
                     taskEl.textContent = item.task;
-                };
-                input.addEventListener('blur', save);
-                input.addEventListener('keydown', (e) => {
-                    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-                    if (e.key === 'Escape') { taskEl.textContent = item.task; }
+                });
+
+                cancelBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    taskEl.textContent = item.task;
+                });
+
+                textarea.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') { e.stopPropagation(); taskEl.textContent = item.task; }
                 });
             });
         });
 
-        // Inline owner editing
+        // Owner editing
         actionsEl.querySelectorAll('.action-pill.owner.editable-pill').forEach(pill => {
             pill.addEventListener('click', (e) => {
                 if (e.target.closest('.action-inline-input')) return;
@@ -728,32 +769,86 @@ window.MeetingsModule = (() => {
             });
         });
 
-        // Inline deadline editing
+        // Deadline editing — date picker with explicit save/cancel
         actionsEl.querySelectorAll('.action-pill.deadline.editable-pill').forEach(pill => {
             pill.addEventListener('click', (e) => {
-                if (e.target.closest('.deadline-date-input')) return;
+                if (e.target.closest('.deadline-picker-wrap')) return;
                 const idx = parseInt(pill.dataset.index);
                 const item = summary.action_items[idx];
-                if (pill.querySelector('.deadline-date-input')) return;
+                if (pill.querySelector('.deadline-picker-wrap')) return;
 
+                const wrap = document.createElement('div');
+                wrap.className = 'deadline-picker-wrap';
                 const dateInput = document.createElement('input');
                 dateInput.type = 'date';
                 dateInput.className = 'deadline-date-input';
                 dateInput.value = item.deadline && item.deadline !== 'TBD' && /^\d{4}-\d{2}-\d{2}$/.test(item.deadline) ? item.deadline : '';
-                pill.appendChild(dateInput);
+
+                const okBtn = document.createElement('button');
+                okBtn.className = 'deadline-picker-ok';
+                okBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+                okBtn.title = 'Save date';
+
+                const clearBtn = document.createElement('button');
+                clearBtn.className = 'deadline-picker-clear';
+                clearBtn.textContent = '✕';
+                clearBtn.title = 'Cancel';
+
+                wrap.appendChild(dateInput);
+                wrap.appendChild(okBtn);
+                wrap.appendChild(clearBtn);
+                pill.appendChild(wrap);
                 dateInput.focus();
 
-                dateInput.addEventListener('change', () => {
+                okBtn.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
                     if (dateInput.value) {
                         item.deadline = dateInput.value;
-                        pill.querySelector('.deadline-text').textContent = dateInput.value;
+                        pill.querySelector('.deadline-text').textContent = formatDeadlineDisplay(dateInput.value);
                         patchActionItem(item.id, { deadline: dateInput.value });
                     }
-                    dateInput.remove();
+                    wrap.remove();
                 });
-                dateInput.addEventListener('blur', () => {
-                    setTimeout(() => dateInput.remove(), 150);
+
+                clearBtn.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    wrap.remove();
                 });
+            });
+        });
+
+        // Priority picklist
+        actionsEl.querySelectorAll('.action-pill.priority-pill.editable-pill').forEach(pill => {
+            pill.addEventListener('click', (e) => {
+                if (e.target.closest('.priority-dropdown')) return;
+                if (pill.querySelector('.priority-dropdown')) return;
+                const idx = parseInt(pill.dataset.index);
+                const item = summary.action_items[idx];
+
+                const dd = document.createElement('div');
+                dd.className = 'priority-dropdown';
+                PRIORITY_OPTIONS.forEach(opt => {
+                    const btn = document.createElement('button');
+                    btn.className = `priority-option priority-${opt}${opt === (item.priority || 'medium') ? ' active' : ''}`;
+                    btn.textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
+                    btn.addEventListener('click', (ev) => {
+                        ev.stopPropagation();
+                        if (opt !== (item.priority || 'medium')) {
+                            item.priority = opt;
+                            pill.className = `action-pill priority-pill editable-pill priority-${opt}`;
+                            pill.querySelector('.priority-text').textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
+                            patchActionItem(item.id, { priority: opt });
+                        }
+                        dd.remove();
+                    });
+                    dd.appendChild(btn);
+                });
+                pill.appendChild(dd);
+
+                const closeDd = (ev) => {
+                    if (!pill.contains(ev.target)) { dd.remove(); document.removeEventListener('click', closeDd); }
+                };
+                setTimeout(() => document.addEventListener('click', closeDd), 0);
             });
         });
 
