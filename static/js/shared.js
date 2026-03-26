@@ -200,8 +200,6 @@
         return raw;
     }
 
-    var GRIP_ICON_SVG = '<svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor"><circle cx="3" cy="3" r="1.5"/><circle cx="9" cy="3" r="1.5"/><circle cx="3" cy="8" r="1.5"/><circle cx="9" cy="8" r="1.5"/><circle cx="3" cy="13" r="1.5"/><circle cx="9" cy="13" r="1.5"/></svg>';
-
     function renderSharedActionItems(actionsEl, summary) {
         if (!summary.action_items || summary.action_items.length === 0) {
             actionsEl.innerHTML = '<p class="text-secondary">No action items recorded.</p>';
@@ -217,7 +215,6 @@
             var priorityLabel = prio.charAt(0).toUpperCase() + prio.slice(1);
             var priorityClass = ' priority-' + prio;
             return '<div class="action-item' + completedClass + '" data-index="' + idx + '">' +
-                '<div class="action-drag-handle" data-index="' + idx + '">' + GRIP_ICON_SVG + '</div>' +
                 '<div class="action-checkbox' + checked + '" data-index="' + idx + '"></div>' +
                 '<div class="action-item-body">' +
                 '<div class="action-task">' + escapeHtml(item.task) + '</div>' +
@@ -229,13 +226,13 @@
                 '<span class="action-pill priority-pill' + priorityClass + '">' +
                     '<span class="priority-text">' + priorityLabel + '</span></span>' +
                 '</div></div>' +
-                '<button class="action-edit-btn" data-index="' + idx + '" title="Edit">' +
-                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>' +
-                '</button></div>';
+                '<span class="action-item-hint">tap to edit &middot; hold to reorder</span>' +
+                '</div>';
         }).join('');
 
         actionsEl.querySelectorAll('.action-checkbox').forEach(function (cb) {
-            cb.addEventListener('click', function () {
+            cb.addEventListener('click', function (e) {
+                e.stopPropagation();
                 var idx = parseInt(cb.dataset.index);
                 var item = summary.action_items[idx];
                 var newVal = !item.completed;
@@ -247,15 +244,7 @@
             });
         });
 
-        actionsEl.querySelectorAll('.action-edit-btn').forEach(function (btn) {
-            btn.addEventListener('click', function (e) {
-                e.stopPropagation();
-                var idx = parseInt(btn.dataset.index);
-                openSharedEditMode(actionsEl, summary, idx);
-            });
-        });
-
-        initSharedDragDrop(actionsEl, summary);
+        initSharedInteractions(actionsEl, summary);
 
         actionsEl.appendChild(buildSharedAddBtn());
         buildSharedHistoryToggle(actionsEl);
@@ -263,13 +252,15 @@
     }
 
     // -----------------------------------------------------------------------
-    // Drag-and-drop reordering for shared view
+    // Long-press to drag, tap to edit (shared view)
     // -----------------------------------------------------------------------
+    var LONG_PRESS_MS = 400;
     var _sharedDndCleanup = null;
 
-    function initSharedDragDrop(container, summary) {
+    function initSharedInteractions(container, summary) {
         if (_sharedDndCleanup) { _sharedDndCleanup(); _sharedDndCleanup = null; }
 
+        var pressState = null;
         var dragState = null;
 
         function getActionItems() {
@@ -277,11 +268,11 @@
         }
 
         function getPointerY(e) {
-            return e.clientY != null ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+            return e.clientY != null ? e.clientY : 0;
         }
 
         function getPointerX(e) {
-            return e.clientX != null ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+            return e.clientX != null ? e.clientX : 0;
         }
 
         function createGhost(sourceEl, x, y) {
@@ -303,21 +294,19 @@
             return ind;
         }
 
-        function onPointerDown(e) {
-            var handle = e.target.closest('.action-drag-handle');
-            if (!handle) return;
-            var item = handle.closest('.action-item');
-            if (!item || item.classList.contains('editing')) return;
+        function cancelPress() {
+            if (pressState) {
+                clearTimeout(pressState.timer);
+                if (pressState.item) pressState.item.classList.remove('drag-ready');
+                pressState = null;
+            }
+        }
 
-            e.preventDefault();
-            e.stopPropagation();
-
+        function startDrag(item, x, y) {
             var items = getActionItems();
             var fromIndex = items.indexOf(item);
             if (fromIndex === -1) return;
 
-            var y = getPointerY(e);
-            var x = getPointerX(e);
             var rects = items.map(function (el) { return el.getBoundingClientRect(); });
 
             dragState = {
@@ -328,16 +317,52 @@
                 indicator: createDropIndicator(),
                 rects: rects,
                 items: items,
-                startY: y,
                 active: true,
             };
 
+            item.classList.remove('drag-ready');
             item.classList.add('dragging');
             document.body.style.userSelect = 'none';
             document.body.style.webkitUserSelect = 'none';
         }
 
+        function onPointerDown(e) {
+            if (dragState) return;
+            var item = e.target.closest('.action-item');
+            if (!item || item.classList.contains('editing')) return;
+            if (e.target.closest('.action-checkbox')) return;
+
+            var x = getPointerX(e);
+            var y = getPointerY(e);
+
+            pressState = {
+                item: item,
+                startX: x,
+                startY: y,
+                moved: false,
+                timer: setTimeout(function () {
+                    if (!pressState || pressState.moved) return;
+                    item.classList.add('drag-ready');
+                    if (navigator.vibrate) navigator.vibrate(30);
+                    setTimeout(function () {
+                        if (!pressState) return;
+                        startDrag(item, pressState.startX, pressState.startY);
+                        pressState = null;
+                    }, 100);
+                }, LONG_PRESS_MS),
+            };
+        }
+
         function onPointerMove(e) {
+            if (pressState && !pressState.moved) {
+                var dx = getPointerX(e) - pressState.startX;
+                var dy = getPointerY(e) - pressState.startY;
+                if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+                    pressState.moved = true;
+                    cancelPress();
+                }
+            }
+
             if (!dragState || !dragState.active) return;
             e.preventDefault();
 
@@ -380,49 +405,77 @@
         }
 
         function onPointerUp() {
-            if (!dragState || !dragState.active) return;
-            dragState.active = false;
+            var wasDragging = dragState && dragState.active;
+            var wasPressed = pressState && !pressState.moved;
 
-            var sourceEl = dragState.sourceEl;
-            var fromIndex = dragState.fromIndex;
-            var toIndex = dragState.toIndex;
-            var ghost = dragState.ghost;
-            var indicator = dragState.indicator;
-            var items = dragState.items;
+            if (dragState && dragState.active) {
+                dragState.active = false;
+                var sourceEl = dragState.sourceEl;
+                var fromIndex = dragState.fromIndex;
+                var toIndex = dragState.toIndex;
+                var ghost = dragState.ghost;
+                var indicator = dragState.indicator;
+                var items = dragState.items;
 
-            items.forEach(function (el) { el.classList.remove('drag-over-above', 'drag-over-below'); });
-            sourceEl.classList.remove('dragging');
-            ghost.remove();
-            if (indicator.parentNode) indicator.remove();
-            document.body.style.userSelect = '';
-            document.body.style.webkitUserSelect = '';
+                items.forEach(function (el) { el.classList.remove('drag-over-above', 'drag-over-below'); });
+                sourceEl.classList.remove('dragging');
+                ghost.remove();
+                if (indicator.parentNode) indicator.remove();
+                document.body.style.userSelect = '';
+                document.body.style.webkitUserSelect = '';
 
-            var finalTo = toIndex > fromIndex ? toIndex - 1 : toIndex;
-
-            if (finalTo !== fromIndex && summary.action_items.length > 1) {
-                var moved = summary.action_items.splice(fromIndex, 1)[0];
-                summary.action_items.splice(finalTo, 0, moved);
-                renderSharedActionItems(container, summary);
-                saveSharedActionItemOrder(summary);
+                var finalTo = toIndex > fromIndex ? toIndex - 1 : toIndex;
+                if (finalTo !== fromIndex && summary.action_items.length > 1) {
+                    var moved = summary.action_items.splice(fromIndex, 1)[0];
+                    summary.action_items.splice(finalTo, 0, moved);
+                    renderSharedActionItems(container, summary);
+                    saveSharedActionItemOrder(summary);
+                }
+                dragState = null;
             }
 
-            dragState = null;
+            if (wasPressed && !wasDragging) {
+                var item = pressState.item;
+                cancelPress();
+                if (item && !item.classList.contains('editing')) {
+                    var idx = parseInt(item.dataset.index);
+                    if (!isNaN(idx)) openSharedEditMode(container, summary, idx);
+                }
+            } else {
+                cancelPress();
+            }
         }
 
-        var touchStartHandler = function (e) {
-            if (e.target.closest('.action-drag-handle')) e.preventDefault();
+        function onPointerCancel() {
+            cancelPress();
+            if (dragState && dragState.active) {
+                dragState.active = false;
+                dragState.items.forEach(function (el) { el.classList.remove('drag-over-above', 'drag-over-below'); });
+                dragState.sourceEl.classList.remove('dragging', 'drag-ready');
+                dragState.ghost.remove();
+                if (dragState.indicator.parentNode) dragState.indicator.remove();
+                document.body.style.userSelect = '';
+                document.body.style.webkitUserSelect = '';
+                dragState = null;
+            }
+        }
+
+        var touchMoveHandler = function (e) {
+            if (dragState && dragState.active) e.preventDefault();
         };
 
         container.addEventListener('pointerdown', onPointerDown);
         document.addEventListener('pointermove', onPointerMove);
         document.addEventListener('pointerup', onPointerUp);
-        container.addEventListener('touchstart', touchStartHandler, { passive: false });
+        document.addEventListener('pointercancel', onPointerCancel);
+        container.addEventListener('touchmove', touchMoveHandler, { passive: false });
 
         _sharedDndCleanup = function () {
             container.removeEventListener('pointerdown', onPointerDown);
             document.removeEventListener('pointermove', onPointerMove);
             document.removeEventListener('pointerup', onPointerUp);
-            container.removeEventListener('touchstart', touchStartHandler);
+            document.removeEventListener('pointercancel', onPointerCancel);
+            container.removeEventListener('touchmove', touchMoveHandler);
         };
     }
 

@@ -1164,47 +1164,33 @@ mark.search-highlight {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 14px;
+  padding: 16px;
   background: var(--bg-elevated);
   border-radius: var(--radius-sm);
-  margin-bottom: 8px;
+  margin-bottom: 6px;
   transition: opacity var(--transition-default), transform 200ms cubic-bezier(.2,.8,.32,1), box-shadow 200ms ease;
   position: relative;
   touch-action: manipulation;
-}
-
-/* Drag handle */
-.action-drag-handle {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  min-width: 20px;
-  height: 28px;
-  cursor: grab;
-  color: var(--text-quaternary, #555);
-  border-radius: 4px;
-  flex-shrink: 0;
-  align-self: flex-start;
-  margin-top: 0;
-  opacity: 0;
-  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
-  touch-action: none;
+  cursor: pointer;
   -webkit-user-select: none;
   user-select: none;
 }
-.action-drag-handle:active { cursor: grabbing; }
-.action-item:hover .action-drag-handle { opacity: 0.7; }
-.action-drag-handle:hover { opacity: 1 !important; color: var(--text-secondary); background: var(--bg-tertiary); }
 
-@media (hover: none) {
-  .action-drag-handle { opacity: 0.6; }
+.action-item:active:not(.editing):not(.drag-ready):not(.dragging) {
+  transform: scale(0.99);
+}
+
+/* Long-press visual feedback: card lifts and glows before drag starts */
+.action-item.drag-ready {
+  transform: scale(1.02);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18), 0 0 0 2px var(--accent-primary);
+  z-index: 10;
 }
 
 /* Drag states */
 .action-item.dragging {
-  opacity: 0.3;
-  transform: scale(0.98);
+  opacity: 0.25;
+  transform: scale(0.97);
 }
 .action-item.drag-over-above {
   transform: translateY(4px);
@@ -1233,16 +1219,18 @@ mark.search-highlight {
   background: var(--bg-elevated);
   border: 1px solid var(--accent-primary);
   border-radius: var(--radius-sm);
-  box-shadow: 0 12px 32px rgba(0,0,0,0.25), 0 2px 8px rgba(0,0,0,0.15);
-  padding: 14px;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.28), 0 2px 8px rgba(0,0,0,0.12);
+  padding: 16px;
   display: flex;
   align-items: flex-start;
   gap: 12px;
   opacity: 0.95;
-  transform: scale(1.02) rotate(1deg);
-  transition: opacity 150ms ease;
-  max-width: min(400px, 80vw);
+  transform: scale(1.03) rotate(0.5deg);
+  max-width: min(400px, 85vw);
   overflow: hidden;
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.4;
 }
 
 .action-item:last-child {
@@ -1374,53 +1362,29 @@ mark.search-highlight {
   margin: -1px -4px;
 }
 
-/* Edit button (pencil icon) on each action item */
-.action-edit-btn {
-  width: 32px;
-  height: 32px;
-  min-width: 32px;
-  border: none;
-  background: transparent;
-  color: var(--text-tertiary);
-  border-radius: var(--radius-sm);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: color var(--transition-fast), background var(--transition-fast);
-  flex-shrink: 0;
-  align-self: flex-start;
-  margin-top: 2px;
+/* Hint text that appears on hover for desktop users */
+.action-item-hint {
+  position: absolute;
+  bottom: 4px;
+  right: 10px;
+  font-size: 10px;
+  color: var(--text-quaternary, #666);
   opacity: 0;
+  transition: opacity var(--transition-fast);
+  pointer-events: none;
+  letter-spacing: 0.01em;
 }
-
-.action-item:hover .action-edit-btn {
-  opacity: 1;
-}
-
-@media (hover: none) {
-  .action-edit-btn {
-    opacity: 1;
-  }
-}
-
-.action-edit-btn:hover {
-  color: var(--accent-primary);
-  background: var(--accent-primary-muted);
-}
-
-.action-edit-btn i,
-.action-edit-btn svg {
-  width: 14px;
-  height: 14px;
-}
+.action-item:hover .action-item-hint { opacity: 1; }
+@media (hover: none) { .action-item-hint { display: none; } }
 
 /* Edit mode form */
 .action-item.editing {
   background: var(--bg-tertiary);
   border: 1px solid var(--accent-primary);
   margin: -1px;
+  cursor: default;
 }
+.action-item.editing .action-item-hint { display: none; }
 
 .action-edit-form {
   display: flex;
