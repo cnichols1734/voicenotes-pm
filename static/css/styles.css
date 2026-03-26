@@ -1343,6 +1343,30 @@ mark.search-highlight {
   background: rgba(50, 215, 75, 0.15);
 }
 
+/* Inline deadline date picker */
+.deadline-date-input {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 10;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 4px 8px;
+  color-scheme: dark;
+}
+
+@media (max-width: 768px) {
+  .deadline-date-input {
+    left: auto;
+    right: 0;
+    width: 160px;
+    max-width: calc(100vw - 32px);
+    font-size: 16px; /* prevents iOS auto-zoom on focus */
+  }
+}
 /* Action items count badge */
 .action-items-count {
   display: none;
