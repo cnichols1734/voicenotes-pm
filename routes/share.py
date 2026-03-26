@@ -181,6 +181,7 @@ def get_shared_meeting(share_id):
             "transcript": meeting.get("transcript"),
             "duration_seconds": meeting.get("duration_seconds"),
             "recorded_at": meeting.get("recorded_at"),
+            "updated_at": meeting.get("updated_at"),
             "status": meeting.get("status"),
             "meeting_type_name": meeting_type_name,
         },

@@ -60,6 +60,7 @@ def create_app():
     from routes.share import share_bp
     from routes.mobile import mobile_bp
     from routes.mobile_auth import mobile_auth_bp
+    from routes.presence import presence_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
@@ -72,6 +73,7 @@ def create_app():
     app.register_blueprint(share_bp)
     app.register_blueprint(mobile_bp)
     app.register_blueprint(mobile_auth_bp)
+    app.register_blueprint(presence_bp)
 
     return app
 

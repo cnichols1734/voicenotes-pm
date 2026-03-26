@@ -11,6 +11,12 @@
     let isStreaming = false;
     let currentMeeting = null;
 
+    // Presence & live-update polling
+    let presenceInterval = null;
+    let lastKnownUpdatedAt = null;
+    const HEARTBEAT_INTERVAL_MS = 5000;
+    const MAX_PRESENCE_BUBBLES = 4;
+
     function getEl(id) { return document.getElementById(id); }
 
     // ---------------------------------------------------------------------------
@@ -89,10 +95,9 @@
         const titleEl = getEl('meeting-title');
         if (titleEl) titleEl.textContent = meeting.title;
 
-        // Meta badges
-        const metaEl = getEl('meeting-meta');
+        var metaEl = getEl('meeting-meta');
         if (metaEl) {
-            let html = '';
+            var html = '';
             if (meeting.meeting_type_name) {
                 html += '<span class="badge badge-type">' + escapeHtml(meeting.meeting_type_name) + '</span>';
             }
@@ -103,16 +108,18 @@
             metaEl.innerHTML = html;
         }
 
-        // Shared by
-        const sharedByEl = getEl('shared-by');
+        var sharedByEl = getEl('shared-by');
         if (sharedByEl && sharedBy) {
             sharedByEl.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg> Shared by ' + escapeHtml(sharedBy);
         }
 
         currentMeeting = meeting;
+        lastKnownUpdatedAt = meeting.updated_at || null;
 
         renderSummary(meeting.summary);
         renderTranscript(meeting.transcript);
+
+        startPresencePolling();
     }
 
     // ---------------------------------------------------------------------------
@@ -824,6 +831,149 @@
     function hideEmpty() {
         var el = getEl('chat-empty');
         if (el) el.style.display = 'none';
+    }
+
+    // ---------------------------------------------------------------------------
+    // Presence polling & live updates
+    // ---------------------------------------------------------------------------
+    function getSharedViewerId() {
+        var key = 'voicenotes_viewer_id';
+        var id = sessionStorage.getItem(key);
+        if (!id) {
+            id = 'sv_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+            sessionStorage.setItem(key, id);
+        }
+        return id;
+    }
+
+    function startPresencePolling() {
+        if (presenceInterval) clearInterval(presenceInterval);
+        sendSharedHeartbeat();
+        presenceInterval = setInterval(sendSharedHeartbeat, HEARTBEAT_INTERVAL_MS);
+
+        window.addEventListener('beforeunload', function () {
+            clearInterval(presenceInterval);
+            var shareId = window.SHARE_ID;
+            var viewerId = getSharedViewerId();
+            var url = '/api/share/' + shareId + '/presence/leave';
+            var body = JSON.stringify({ viewer_id: viewerId });
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon(url, body);
+            } else {
+                fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body, keepalive: true });
+            }
+        });
+    }
+
+    async function sendSharedHeartbeat() {
+        var shareId = window.SHARE_ID;
+        if (!shareId) return;
+        var viewerId = getSharedViewerId();
+        try {
+            var resp = await fetch('/api/share/' + shareId + '/presence/heartbeat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ viewer_id: viewerId, display_name: 'Guest' }),
+            });
+            if (!resp.ok) return;
+            var data = await resp.json();
+            renderPresenceBubbles(data.viewers || []);
+
+            if (lastKnownUpdatedAt && data.meeting_updated_at && data.meeting_updated_at !== lastKnownUpdatedAt) {
+                lastKnownUpdatedAt = data.meeting_updated_at;
+                await refreshSharedMeetingData();
+            }
+        } catch (_) {
+            // Non-critical
+        }
+    }
+
+    async function refreshSharedMeetingData() {
+        var shareId = window.SHARE_ID;
+        if (!shareId) return;
+        try {
+            var resp = await fetch('/api/share/' + shareId);
+            if (!resp.ok) return;
+            var data = await resp.json();
+            var meeting = data.meeting;
+            currentMeeting = meeting;
+            lastKnownUpdatedAt = meeting.updated_at || null;
+
+            var titleEl = getEl('meeting-title');
+            if (titleEl && titleEl.textContent !== meeting.title) {
+                titleEl.textContent = meeting.title;
+            }
+
+            renderSummary(meeting.summary);
+            renderTranscript(meeting.transcript);
+
+            showUpdateFlash();
+        } catch (_) {
+            // Non-critical
+        }
+    }
+
+    function showUpdateFlash() {
+        var container = getEl('presence-bubbles');
+        if (!container) return;
+        var existing = container.querySelector('.presence-update-dot');
+        if (existing) existing.remove();
+        var dot = document.createElement('div');
+        dot.className = 'presence-update-dot';
+        container.appendChild(dot);
+        dot.addEventListener('animationend', function () { dot.remove(); });
+    }
+
+    function renderPresenceBubbles(viewers) {
+        var container = getEl('presence-bubbles');
+        if (!container) return;
+
+        var shown = viewers.slice(0, MAX_PRESENCE_BUBBLES);
+        var overflow = viewers.length - shown.length;
+
+        var currentIds = {};
+        shown.forEach(function (v) { currentIds[v.viewer_id] = true; });
+        container.querySelectorAll('.presence-bubble').forEach(function (el) {
+            if (!currentIds[el.dataset.viewerId]) el.remove();
+        });
+        var overflowEl = container.querySelector('.presence-viewer-count');
+        if (overflowEl && overflow <= 0) overflowEl.remove();
+
+        shown.forEach(function (viewer) {
+            var bubble = container.querySelector('.presence-bubble[data-viewer-id="' + viewer.viewer_id + '"]');
+            if (!bubble) {
+                bubble = document.createElement('div');
+                bubble.className = 'presence-bubble';
+                bubble.dataset.viewerId = viewer.viewer_id;
+                var tooltip = document.createElement('span');
+                tooltip.className = 'presence-tooltip';
+                bubble.appendChild(tooltip);
+                var updateDot = container.querySelector('.presence-update-dot');
+                if (updateDot) {
+                    container.insertBefore(bubble, updateDot);
+                } else {
+                    container.appendChild(bubble);
+                }
+            }
+            bubble.style.backgroundColor = viewer.color;
+            bubble.childNodes[0].textContent = viewer.initials;
+            bubble.querySelector('.presence-tooltip').textContent = viewer.display_name;
+        });
+
+        if (overflow > 0) {
+            var countEl = container.querySelector('.presence-viewer-count');
+            if (!countEl) {
+                countEl = document.createElement('div');
+                countEl.className = 'presence-viewer-count';
+                var updateDot = container.querySelector('.presence-update-dot');
+                if (updateDot) {
+                    container.insertBefore(countEl, updateDot);
+                } else {
+                    container.appendChild(countEl);
+                }
+            }
+            countEl.textContent = '+' + overflow;
+        }
     }
 
     // ---------------------------------------------------------------------------
