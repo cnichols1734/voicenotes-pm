@@ -12,7 +12,7 @@ from services.supabase_client import get_supabase
 
 logger = logging.getLogger(__name__)
 
-EDITABLE_FIELDS = {"task", "owner", "deadline", "completed"}
+EDITABLE_FIELDS = {"task", "owner", "deadline", "completed", "priority"}
 
 
 def ensure_action_item_ids(summary: dict) -> bool:

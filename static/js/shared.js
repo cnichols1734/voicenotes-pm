@@ -181,6 +181,18 @@
     // ---------------------------------------------------------------------------
     // Shared action items: checkbox, inline editing, add, history
     // ---------------------------------------------------------------------------
+    var PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent'];
+
+    function formatDeadlineDisplay(raw) {
+        if (!raw || raw === 'TBD') return 'Set date';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+            var parts = raw.split('-');
+            var dt = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+            return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+        return raw;
+    }
+
     function renderSharedActionItems(actionsEl, summary) {
         if (!summary.action_items || summary.action_items.length === 0) {
             actionsEl.innerHTML = '<p class="text-secondary">No action items recorded.</p>';
@@ -192,8 +204,9 @@
         actionsEl.innerHTML = summary.action_items.map(function (item, idx) {
             var checked = item.completed ? ' checked' : '';
             var completedClass = item.completed ? ' completed' : '';
-            var priorityLabel = item.priority ? item.priority.charAt(0).toUpperCase() + item.priority.slice(1) : '';
-            var priorityClass = item.priority ? ' priority-' + item.priority : '';
+            var prio = item.priority || 'medium';
+            var priorityLabel = prio.charAt(0).toUpperCase() + prio.slice(1);
+            var priorityClass = ' priority-' + prio;
             return '<div class="action-item' + completedClass + '" data-index="' + idx + '">' +
                 '<div class="action-checkbox' + checked + '" data-index="' + idx + '"></div>' +
                 '<div class="action-item-body">' +
@@ -202,8 +215,9 @@
                 '<span class="action-pill owner editable-pill" data-index="' + idx + '">' +
                     '<span class="owner-text">' + (item.owner ? escapeHtml(item.owner) : 'Assign') + '</span></span>' +
                 '<span class="action-pill deadline editable-pill" data-index="' + idx + '">' +
-                    '<span class="deadline-text">' + (item.deadline ? escapeHtml(item.deadline) : 'Set date') + '</span></span>' +
-                (item.priority ? '<span class="action-pill priority-pill' + priorityClass + '">' + priorityLabel + '</span>' : '') +
+                    '<span class="deadline-text">' + formatDeadlineDisplay(item.deadline) + '</span></span>' +
+                '<span class="action-pill priority-pill editable-pill' + priorityClass + '" data-index="' + idx + '">' +
+                    '<span class="priority-text">' + priorityLabel + '</span></span>' +
                 '</div></div></div>';
         }).join('');
 
@@ -221,38 +235,67 @@
             });
         });
 
-        // Inline task text editing
+        // Task text editing — expandable textarea with save button
         actionsEl.querySelectorAll('.action-task').forEach(function (taskEl) {
             taskEl.addEventListener('click', function () {
-                if (taskEl.querySelector('.action-inline-input')) return;
+                if (taskEl.querySelector('.action-edit-area')) return;
                 var idx = parseInt(taskEl.dataset.index);
                 var item = summary.action_items[idx];
-                var input = document.createElement('input');
-                input.type = 'text';
-                input.className = 'action-inline-input';
-                input.value = item.task;
-                taskEl.textContent = '';
-                taskEl.appendChild(input);
-                input.focus();
-                input.select();
 
-                function save() {
-                    var val = input.value.trim();
+                var wrapper = document.createElement('div');
+                wrapper.className = 'action-edit-area';
+
+                var textarea = document.createElement('textarea');
+                textarea.className = 'action-edit-textarea';
+                textarea.value = item.task;
+                textarea.rows = Math.max(2, Math.ceil(item.task.length / 50));
+
+                var btnRow = document.createElement('div');
+                btnRow.className = 'action-edit-btns';
+                var saveBtn = document.createElement('button');
+                saveBtn.className = 'action-edit-save';
+                saveBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Save';
+                var cancelBtn = document.createElement('button');
+                cancelBtn.className = 'action-edit-cancel';
+                cancelBtn.textContent = 'Cancel';
+                btnRow.appendChild(cancelBtn);
+                btnRow.appendChild(saveBtn);
+
+                wrapper.appendChild(textarea);
+                wrapper.appendChild(btnRow);
+                taskEl.textContent = '';
+                taskEl.appendChild(wrapper);
+                textarea.focus();
+
+                function autoGrow() {
+                    textarea.style.height = 'auto';
+                    textarea.style.height = textarea.scrollHeight + 'px';
+                }
+                textarea.addEventListener('input', autoGrow);
+                setTimeout(autoGrow, 0);
+
+                saveBtn.addEventListener('click', function (ev) {
+                    ev.stopPropagation();
+                    var val = textarea.value.trim();
                     if (val && val !== item.task) {
                         item.task = val;
                         patchSharedItem(item.id, { task: val });
                     }
                     taskEl.textContent = item.task;
-                }
-                input.addEventListener('blur', save);
-                input.addEventListener('keydown', function (e) {
-                    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-                    if (e.key === 'Escape') { taskEl.textContent = item.task; }
+                });
+
+                cancelBtn.addEventListener('click', function (ev) {
+                    ev.stopPropagation();
+                    taskEl.textContent = item.task;
+                });
+
+                textarea.addEventListener('keydown', function (e) {
+                    if (e.key === 'Escape') { e.stopPropagation(); taskEl.textContent = item.task; }
                 });
             });
         });
 
-        // Inline owner editing
+        // Owner editing
         actionsEl.querySelectorAll('.action-pill.owner.editable-pill').forEach(function (pill) {
             pill.addEventListener('click', function (e) {
                 if (e.target.closest('.action-inline-input')) return;
@@ -289,32 +332,86 @@
             });
         });
 
-        // Inline deadline editing
+        // Deadline editing — date picker with explicit save/cancel
         actionsEl.querySelectorAll('.action-pill.deadline.editable-pill').forEach(function (pill) {
             pill.addEventListener('click', function (e) {
-                if (e.target.closest('.deadline-date-input')) return;
+                if (e.target.closest('.deadline-picker-wrap')) return;
                 var idx = parseInt(pill.dataset.index);
                 var item = summary.action_items[idx];
-                if (pill.querySelector('.deadline-date-input')) return;
+                if (pill.querySelector('.deadline-picker-wrap')) return;
 
+                var wrap = document.createElement('div');
+                wrap.className = 'deadline-picker-wrap';
                 var dateInput = document.createElement('input');
                 dateInput.type = 'date';
                 dateInput.className = 'deadline-date-input';
                 dateInput.value = item.deadline && item.deadline !== 'TBD' && /^\d{4}-\d{2}-\d{2}$/.test(item.deadline) ? item.deadline : '';
-                pill.appendChild(dateInput);
+
+                var okBtn = document.createElement('button');
+                okBtn.className = 'deadline-picker-ok';
+                okBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+                okBtn.title = 'Save date';
+
+                var clearBtn = document.createElement('button');
+                clearBtn.className = 'deadline-picker-clear';
+                clearBtn.textContent = '\u2715';
+                clearBtn.title = 'Cancel';
+
+                wrap.appendChild(dateInput);
+                wrap.appendChild(okBtn);
+                wrap.appendChild(clearBtn);
+                pill.appendChild(wrap);
                 dateInput.focus();
 
-                dateInput.addEventListener('change', function () {
+                okBtn.addEventListener('click', function (ev) {
+                    ev.stopPropagation();
                     if (dateInput.value) {
                         item.deadline = dateInput.value;
-                        pill.querySelector('.deadline-text').textContent = dateInput.value;
+                        pill.querySelector('.deadline-text').textContent = formatDeadlineDisplay(dateInput.value);
                         patchSharedItem(item.id, { deadline: dateInput.value });
                     }
-                    dateInput.remove();
+                    wrap.remove();
                 });
-                dateInput.addEventListener('blur', function () {
-                    setTimeout(function () { dateInput.remove(); }, 150);
+
+                clearBtn.addEventListener('click', function (ev) {
+                    ev.stopPropagation();
+                    wrap.remove();
                 });
+            });
+        });
+
+        // Priority picklist
+        actionsEl.querySelectorAll('.action-pill.priority-pill.editable-pill').forEach(function (pill) {
+            pill.addEventListener('click', function (e) {
+                if (e.target.closest('.priority-dropdown')) return;
+                if (pill.querySelector('.priority-dropdown')) return;
+                var idx = parseInt(pill.dataset.index);
+                var item = summary.action_items[idx];
+
+                var dd = document.createElement('div');
+                dd.className = 'priority-dropdown';
+                PRIORITY_OPTIONS.forEach(function (opt) {
+                    var btn = document.createElement('button');
+                    btn.className = 'priority-option priority-' + opt + (opt === (item.priority || 'medium') ? ' active' : '');
+                    btn.textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
+                    btn.addEventListener('click', function (ev) {
+                        ev.stopPropagation();
+                        if (opt !== (item.priority || 'medium')) {
+                            item.priority = opt;
+                            pill.className = 'action-pill priority-pill editable-pill priority-' + opt;
+                            pill.querySelector('.priority-text').textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
+                            patchSharedItem(item.id, { priority: opt });
+                        }
+                        dd.remove();
+                    });
+                    dd.appendChild(btn);
+                });
+                pill.appendChild(dd);
+
+                var closeDd = function (ev) {
+                    if (!pill.contains(ev.target)) { dd.remove(); document.removeEventListener('click', closeDd); }
+                };
+                setTimeout(function () { document.addEventListener('click', closeDd); }, 0);
             });
         });
 
