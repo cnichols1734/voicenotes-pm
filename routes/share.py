@@ -14,7 +14,7 @@ from services.supabase_client import get_supabase
 from services.chat_service import stream_chat_response
 from services.action_items import (
     ensure_action_item_ids, update_action_item, create_action_item,
-    get_history as get_action_item_history,
+    reorder_action_items, get_history as get_action_item_history,
 )
 
 logger = logging.getLogger(__name__)
@@ -245,6 +245,32 @@ def post_shared_action_item(share_id):
     except Exception as exc:
         logger.error("Failed to create shared action item: %s", exc)
         return jsonify({"error": f"Failed to create: {exc}"}), 503
+
+
+@share_bp.route("/api/share/<share_id>/action-items/reorder", methods=["PUT"])
+def reorder_shared_action_items(share_id):
+    """Reorder action items via a shared link."""
+    link = _get_share_link(share_id)
+    if not link:
+        return jsonify({"error": "Share link not found or expired"}), 404
+
+    meeting = _get_meeting_by_id(link["meeting_id"])
+    if not meeting:
+        return jsonify({"error": "Meeting not found"}), 404
+
+    data = request.get_json(force=True) or {}
+    ordered_ids = data.get("ordered_ids")
+    if not ordered_ids or not isinstance(ordered_ids, list):
+        return jsonify({"error": "ordered_ids array required"}), 400
+
+    try:
+        summary = reorder_action_items(meeting, ordered_ids)
+        return jsonify({"summary": summary})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logger.error("Failed to reorder shared action items: %s", exc)
+        return jsonify({"error": f"Failed to reorder: {exc}"}), 503
 
 
 @share_bp.route("/api/share/<share_id>/action-items/history", methods=["GET"])

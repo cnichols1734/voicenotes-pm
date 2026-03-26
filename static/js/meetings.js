@@ -637,6 +637,8 @@ window.MeetingsModule = (() => {
 
     const PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent'];
 
+    const GRIP_ICON_SVG = '<svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor"><circle cx="3" cy="3" r="1.5"/><circle cx="9" cy="3" r="1.5"/><circle cx="3" cy="8" r="1.5"/><circle cx="9" cy="8" r="1.5"/><circle cx="3" cy="13" r="1.5"/><circle cx="9" cy="13" r="1.5"/></svg>';
+
     function renderActionItems(actionsEl, summary) {
         if (!summary.action_items || summary.action_items.length === 0) {
             actionsEl.innerHTML = '<p class="text-secondary">No action items recorded.</p>';
@@ -654,6 +656,7 @@ window.MeetingsModule = (() => {
             const itemId = item.id || idx;
             return `
           <div class="action-item${completedClass}" data-item-id="${escapeHtml(String(itemId))}" data-index="${idx}">
+            <div class="action-drag-handle" data-index="${idx}">${GRIP_ICON_SVG}</div>
             <div class="action-checkbox${checked}" data-index="${idx}"></div>
             <div class="action-item-body">
               <div class="action-task">${escapeHtml(item.task)}</div>
@@ -669,7 +672,6 @@ window.MeetingsModule = (() => {
           </div>`;
         }).join('');
 
-        // Checkbox toggles (stay as direct action)
         actionsEl.querySelectorAll('.action-checkbox').forEach(cb => {
             cb.addEventListener('click', () => {
                 const idx = parseInt(cb.dataset.index);
@@ -683,7 +685,6 @@ window.MeetingsModule = (() => {
             });
         });
 
-        // Edit buttons
         actionsEl.querySelectorAll('.action-edit-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -692,10 +693,190 @@ window.MeetingsModule = (() => {
             });
         });
 
+        initActionItemDragDrop(actionsEl, summary);
+
         actionsEl.appendChild(buildAddActionItemBtn());
         buildHistoryToggle(actionsEl);
         updateActionItemsCount(summary.action_items);
         if (window.lucide) lucide.createIcons();
+    }
+
+    // -----------------------------------------------------------------------
+    // Drag-and-drop reordering (pointer events: works on desktop + mobile)
+    // -----------------------------------------------------------------------
+    let _dndCleanup = null;
+
+    function initActionItemDragDrop(container, summary) {
+        if (_dndCleanup) { _dndCleanup(); _dndCleanup = null; }
+
+        let dragState = null;
+
+        function getActionItems() {
+            return Array.from(container.querySelectorAll('.action-item'));
+        }
+
+        function getPointerY(e) {
+            return e.clientY ?? (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+        }
+
+        function getPointerX(e) {
+            return e.clientX ?? (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+        }
+
+        function createGhost(sourceEl, x, y) {
+            const ghost = document.createElement('div');
+            ghost.className = 'action-item-ghost';
+            const task = sourceEl.querySelector('.action-task');
+            if (task) ghost.textContent = task.textContent;
+            const rect = sourceEl.getBoundingClientRect();
+            ghost.style.width = rect.width + 'px';
+            ghost.style.left = (x - rect.width / 2) + 'px';
+            ghost.style.top = (y - 20) + 'px';
+            document.body.appendChild(ghost);
+            return ghost;
+        }
+
+        function createDropIndicator() {
+            const ind = document.createElement('div');
+            ind.className = 'action-items-drop-indicator';
+            return ind;
+        }
+
+        function onPointerDown(e) {
+            const handle = e.target.closest('.action-drag-handle');
+            if (!handle) return;
+            const item = handle.closest('.action-item');
+            if (!item || item.classList.contains('editing')) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const items = getActionItems();
+            const fromIndex = items.indexOf(item);
+            if (fromIndex === -1) return;
+
+            const y = getPointerY(e);
+            const x = getPointerX(e);
+
+            const rects = items.map(el => el.getBoundingClientRect());
+
+            dragState = {
+                sourceEl: item,
+                fromIndex,
+                toIndex: fromIndex,
+                ghost: createGhost(item, x, y),
+                indicator: createDropIndicator(),
+                rects,
+                items,
+                startY: y,
+                active: true,
+            };
+
+            item.classList.add('dragging');
+            document.body.style.userSelect = 'none';
+            document.body.style.webkitUserSelect = 'none';
+        }
+
+        function onPointerMove(e) {
+            if (!dragState || !dragState.active) return;
+            e.preventDefault();
+
+            const y = getPointerY(e);
+            const x = getPointerX(e);
+
+            dragState.ghost.style.left = (x - parseInt(dragState.ghost.style.width) / 2) + 'px';
+            dragState.ghost.style.top = (y - 20) + 'px';
+
+            let newIndex = dragState.fromIndex;
+            const items = dragState.items;
+            for (let i = 0; i < items.length; i++) {
+                const rect = dragState.rects[i];
+                const mid = rect.top + rect.height / 2;
+                if (y < mid) {
+                    newIndex = i;
+                    break;
+                }
+                newIndex = i + 1;
+            }
+            newIndex = Math.max(0, Math.min(newIndex, items.length));
+
+            if (newIndex !== dragState.toIndex) {
+                dragState.toIndex = newIndex;
+                if (dragState.indicator.parentNode) dragState.indicator.remove();
+                if (newIndex >= items.length) {
+                    const lastItem = items[items.length - 1];
+                    lastItem.parentNode.insertBefore(dragState.indicator, lastItem.nextSibling);
+                } else {
+                    items[newIndex].parentNode.insertBefore(dragState.indicator, items[newIndex]);
+                }
+            }
+
+            items.forEach((el, i) => {
+                if (el === dragState.sourceEl) return;
+                el.classList.remove('drag-over-above', 'drag-over-below');
+                if (dragState.fromIndex < newIndex) {
+                    if (i > dragState.fromIndex && i < newIndex) el.classList.add('drag-over-above');
+                } else if (dragState.fromIndex > newIndex) {
+                    if (i >= newIndex && i < dragState.fromIndex) el.classList.add('drag-over-below');
+                }
+            });
+        }
+
+        async function onPointerUp() {
+            if (!dragState || !dragState.active) return;
+            dragState.active = false;
+
+            const { sourceEl, fromIndex, toIndex, ghost, indicator, items } = dragState;
+
+            items.forEach(el => el.classList.remove('drag-over-above', 'drag-over-below'));
+            sourceEl.classList.remove('dragging');
+            ghost.remove();
+            if (indicator.parentNode) indicator.remove();
+            document.body.style.userSelect = '';
+            document.body.style.webkitUserSelect = '';
+
+            const finalTo = toIndex > fromIndex ? toIndex - 1 : toIndex;
+
+            if (finalTo !== fromIndex && summary.action_items.length > 1) {
+                const [moved] = summary.action_items.splice(fromIndex, 1);
+                summary.action_items.splice(finalTo, 0, moved);
+                renderActionItems(container, summary);
+                await saveActionItemOrder(summary);
+            }
+
+            dragState = null;
+        }
+
+        const touchStartHandler = (e) => {
+            if (e.target.closest('.action-drag-handle')) e.preventDefault();
+        };
+
+        container.addEventListener('pointerdown', onPointerDown);
+        document.addEventListener('pointermove', onPointerMove);
+        document.addEventListener('pointerup', onPointerUp);
+        container.addEventListener('touchstart', touchStartHandler, { passive: false });
+
+        _dndCleanup = () => {
+            container.removeEventListener('pointerdown', onPointerDown);
+            document.removeEventListener('pointermove', onPointerMove);
+            document.removeEventListener('pointerup', onPointerUp);
+            container.removeEventListener('touchstart', touchStartHandler);
+        };
+    }
+
+    async function saveActionItemOrder(summary) {
+        if (!currentMeeting) return;
+        const orderedIds = summary.action_items.map(item => item.id).filter(Boolean);
+        if (orderedIds.length === 0) return;
+        try {
+            await api(`/api/recordings/${currentMeeting.id}/action-items/reorder`, {
+                method: 'PUT',
+                body: { ordered_ids: orderedIds },
+            });
+        } catch (err) {
+            console.error('Failed to save action item order:', err);
+            showToast('Failed to save order.', 'error');
+        }
     }
 
     function openActionItemEditMode(actionsEl, summary, idx) {
