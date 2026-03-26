@@ -2,6 +2,8 @@
 {% block title %}Meeting Detail - VoiceNotez{% endblock %}
 
 {% block content %}
+<div class="meeting-layout">
+<div class="meeting-main">
 <div class="detail-page">
     <!-- Breadcrumb -->
     <div class="detail-header">
@@ -192,6 +194,47 @@
         <div class="transcript-content" id="transcript-content">Loading transcript...</div>
     </div>
 </div>
+</div><!-- .meeting-main -->
+
+<aside class="comments-panel" id="comments-panel">
+    <div class="comments-header">
+        <div class="comments-header-left">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            <h3 class="comments-title">Comments</h3>
+        </div>
+        <span class="comments-count" id="comments-count">0</span>
+    </div>
+    <div class="comments-list" id="comments-list">
+        <div class="comments-empty" id="comments-empty">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </svg>
+            <span>No comments yet</span>
+        </div>
+    </div>
+    <div class="comments-input-area" id="comments-input-area">
+        <div class="comments-toolbar" id="comments-toolbar">
+            <button type="button" data-cmd="bold" title="Bold"><strong>B</strong></button>
+            <button type="button" data-cmd="italic" title="Italic"><em>I</em></button>
+            <div class="comments-toolbar-divider"></div>
+            <button type="button" data-cmd="insertUnorderedList" title="Bullet list">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+            <button type="button" data-cmd="insertOrderedList" title="Numbered list">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg>
+            </button>
+        </div>
+        <div class="comments-editor" id="comments-editor" contenteditable="true" data-placeholder="Add a comment..."></div>
+        <div class="comments-input-footer">
+            <button class="comments-send-btn" id="comments-send-btn" disabled>Post</button>
+        </div>
+    </div>
+</aside>
+</div><!-- .meeting-layout -->
 
 <!-- Re-summarize modal -->
 <div class="modal-backdrop" id="resurface-modal">

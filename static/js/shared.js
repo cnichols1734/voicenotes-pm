@@ -17,6 +17,11 @@
     const HEARTBEAT_INTERVAL_MS = 5000;
     const MAX_PRESENCE_BUBBLES = 4;
 
+    // Comments polling
+    let commentsInterval = null;
+    let lastKnownCommentId = null;
+    const COMMENTS_POLL_MS = 5000;
+
     function getEl(id) { return document.getElementById(id); }
 
     // ---------------------------------------------------------------------------
@@ -120,6 +125,7 @@
         renderTranscript(meeting.transcript);
 
         startPresencePolling();
+        initSharedComments();
     }
 
     // ---------------------------------------------------------------------------
@@ -1143,6 +1149,233 @@
                 }
             }
             countEl.textContent = '+' + overflow;
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Comments
+    // ---------------------------------------------------------------------------
+
+    var COMMENT_COLORS = [
+        '#4A90D9', '#E85D75', '#50C878', '#F5A623', '#9B59B6',
+        '#1ABC9C', '#E74C3C', '#3498DB', '#2ECC71', '#E67E22',
+        '#8E44AD', '#16A085', '#D35400', '#2980B9', '#27AE60',
+    ];
+
+    function commentColorFor(name) {
+        var hash = 0;
+        for (var i = 0; i < name.length; i++) {
+            hash = ((hash << 5) - hash) + name.charCodeAt(i);
+            hash |= 0;
+        }
+        return COMMENT_COLORS[Math.abs(hash) % COMMENT_COLORS.length];
+    }
+
+    function commentInitials(name) {
+        var parts = name.trim().split(/\s+/);
+        if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+        return name.slice(0, 2).toUpperCase();
+    }
+
+    function commentTimeAgo(dateStr) {
+        var now = Date.now();
+        var then = new Date(dateStr).getTime();
+        var diff = Math.max(0, now - then);
+        var secs = Math.floor(diff / 1000);
+        if (secs < 10) return 'just now';
+        if (secs < 60) return secs + 's ago';
+        var mins = Math.floor(secs / 60);
+        if (mins < 60) return mins + 'm ago';
+        var hours = Math.floor(mins / 60);
+        if (hours < 24) return hours + 'h ago';
+        var days = Math.floor(hours / 24);
+        return days + 'd ago';
+    }
+
+    function renderCommentItem(c) {
+        var div = document.createElement('div');
+        div.className = 'comment-item';
+        div.dataset.commentId = c.id;
+        var color = commentColorFor(c.commenter_name);
+        var initials = commentInitials(c.commenter_name);
+        div.innerHTML =
+            '<div class="comment-header">' +
+                '<span class="comment-avatar" style="background:' + color + '">' + initials + '</span>' +
+                '<span class="comment-author">' + escapeHtml(c.commenter_name) + '</span>' +
+                '<span class="comment-time">' + commentTimeAgo(c.created_at) + '</span>' +
+            '</div>' +
+            '<div class="comment-body">' + c.content + '</div>';
+        return div;
+    }
+
+    function renderCommentsList(comments) {
+        var listEl = getEl('comments-list');
+        var emptyEl = getEl('comments-empty');
+        var countEl = getEl('comments-count');
+        if (!listEl) return;
+
+        if (countEl) countEl.textContent = comments.length;
+
+        if (comments.length === 0) {
+            if (emptyEl) emptyEl.style.display = '';
+            listEl.querySelectorAll('.comment-item').forEach(function (el) { el.remove(); });
+            return;
+        }
+
+        if (emptyEl) emptyEl.style.display = 'none';
+
+        var existingIds = {};
+        listEl.querySelectorAll('.comment-item').forEach(function (el) { existingIds[el.dataset.commentId] = true; });
+
+        var newIds = {};
+        comments.forEach(function (c) { newIds[c.id] = true; });
+        listEl.querySelectorAll('.comment-item').forEach(function (el) {
+            if (!newIds[el.dataset.commentId]) el.remove();
+        });
+
+        var shouldScroll = false;
+        comments.forEach(function (c) {
+            if (!existingIds[c.id]) {
+                var item = renderCommentItem(c);
+                item.classList.add('comment-new');
+                listEl.appendChild(item);
+                shouldScroll = true;
+            }
+        });
+
+        if (shouldScroll) {
+            listEl.scrollTop = listEl.scrollHeight;
+        }
+
+        listEl.querySelectorAll('.comment-item').forEach(function (el, i) {
+            if (comments[i]) {
+                var timeEl = el.querySelector('.comment-time');
+                if (timeEl) timeEl.textContent = commentTimeAgo(comments[i].created_at);
+            }
+        });
+    }
+
+    function getSharedCommenterName() {
+        var input = getEl('comments-name-input');
+        if (input && input.value.trim()) {
+            sessionStorage.setItem('voicenotes_commenter_name', input.value.trim());
+            return input.value.trim();
+        }
+        return sessionStorage.getItem('voicenotes_commenter_name') || '';
+    }
+
+    function initSharedComments() {
+        var shareId = window.SHARE_ID;
+        if (!shareId) return;
+
+        var editor = getEl('comments-editor');
+        var sendBtn = getEl('comments-send-btn');
+        var toolbar = getEl('comments-toolbar');
+        var nameInput = getEl('comments-name-input');
+        if (!editor || !sendBtn) return;
+
+        // Restore saved name
+        if (nameInput) {
+            var savedName = sessionStorage.getItem('voicenotes_commenter_name');
+            if (savedName) nameInput.value = savedName;
+        }
+
+        // Toolbar commands
+        if (toolbar) {
+            toolbar.addEventListener('click', function (e) {
+                var btn = e.target.closest('button[data-cmd]');
+                if (!btn) return;
+                e.preventDefault();
+                document.execCommand(btn.dataset.cmd, false, null);
+                editor.focus();
+                updateToolbarState();
+            });
+        }
+
+        function updateToolbarState() {
+            if (!toolbar) return;
+            toolbar.querySelectorAll('button[data-cmd]').forEach(function (btn) {
+                var cmd = btn.dataset.cmd;
+                btn.classList.toggle('active', document.queryCommandState(cmd));
+            });
+        }
+
+        function checkEditorContent() {
+            var hasContent = editor.textContent.trim().length > 0;
+            sendBtn.disabled = !hasContent;
+        }
+
+        editor.addEventListener('input', checkEditorContent);
+        editor.addEventListener('keyup', updateToolbarState);
+        editor.addEventListener('mouseup', updateToolbarState);
+
+        editor.addEventListener('keydown', function (e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                if (!sendBtn.disabled) postSharedComment();
+            }
+        });
+
+        sendBtn.addEventListener('click', function () {
+            postSharedComment();
+        });
+
+        fetchSharedComments();
+        if (commentsInterval) clearInterval(commentsInterval);
+        commentsInterval = setInterval(fetchSharedComments, COMMENTS_POLL_MS);
+    }
+
+    async function fetchSharedComments() {
+        var shareId = window.SHARE_ID;
+        if (!shareId) return;
+        try {
+            var resp = await fetch('/api/share/' + shareId + '/comments');
+            if (!resp.ok) return;
+            var data = await resp.json();
+            var comments = data.comments || [];
+            var latestId = comments.length ? comments[comments.length - 1].id : null;
+            if (latestId !== lastKnownCommentId) {
+                lastKnownCommentId = latestId;
+                renderCommentsList(comments);
+            }
+        } catch (_) {
+            // Non-critical
+        }
+    }
+
+    async function postSharedComment() {
+        var shareId = window.SHARE_ID;
+        if (!shareId) return;
+
+        var editor = getEl('comments-editor');
+        var sendBtn = getEl('comments-send-btn');
+        if (!editor) return;
+
+        var content = editor.innerHTML.trim();
+        if (!content || content === '<br>') return;
+
+        var commenterName = getSharedCommenterName();
+
+        sendBtn.disabled = true;
+        try {
+            var resp = await fetch('/api/share/' + shareId + '/comments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    content: content,
+                    commenter_name: commenterName,
+                }),
+            });
+            if (!resp.ok) {
+                var err = await resp.json().catch(function () { return {}; });
+                throw new Error(err.error || 'Failed to post');
+            }
+            editor.innerHTML = '';
+            sendBtn.disabled = true;
+            await fetchSharedComments();
+        } catch (err) {
+            showToast('Failed to post comment: ' + err.message, 'error');
+            sendBtn.disabled = false;
         }
     }
 
