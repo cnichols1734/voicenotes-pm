@@ -1396,7 +1396,7 @@ mark.search-highlight {
   flex-direction: column;
   gap: 14px;
   width: 100%;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .action-edit-field {
@@ -1474,12 +1474,18 @@ mark.search-highlight {
   color-scheme: dark;
   text-align: left;
   display: block;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
+  min-inline-size: 0;
   font-size: 16px; /* prevents iOS auto-zoom on focus */
 }
 .action-edit-date::-webkit-datetime-edit,
 .action-edit-date::-webkit-datetime-edit-fields-wrapper {
   width: 100%;
+  min-width: 0;
+}
+.action-edit-date::-webkit-date-and-time-value {
   min-width: 0;
 }
 .action-edit-date:not(:focus):invalid,
@@ -1599,6 +1605,16 @@ mark.search-highlight {
 
 @media (max-width: 480px) {
   .action-item.editing .action-item-body { padding: 14px 14px; }
+  .action-edit-field {
+    min-width: 0;
+  }
+  .action-edit-input,
+  .action-edit-date {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-inline-size: 0;
+  }
   .action-edit-btns {
     justify-content: stretch;
   }
