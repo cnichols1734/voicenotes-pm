@@ -91,7 +91,13 @@ def get_recording(meeting_id):
         )
         if not result.data:
             return jsonify({"error": "Meeting not found"}), 404
-        return jsonify({"meeting": result.data})
+        meeting = result.data
+        # Backfill stable IDs on action items for existing meetings
+        summary = meeting.get("summary")
+        if summary and ensure_action_item_ids(summary):
+            supabase.table("meetings").update({"summary": summary}).eq("id", meeting_id).execute()
+            meeting["summary"] = summary
+        return jsonify({"meeting": meeting})
     except Exception as exc:
         logger.error("Failed to get recording %s: %s", meeting_id, exc)
         return _supabase_error(f"Failed to fetch meeting: {exc}")

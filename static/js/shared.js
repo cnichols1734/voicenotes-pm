@@ -111,15 +111,6 @@
 
         currentMeeting = meeting;
 
-        // Backfill action item IDs if missing
-        if (meeting.summary && meeting.summary.action_items) {
-            meeting.summary.action_items.forEach(function (item) {
-                if (!item.id) {
-                    item.id = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
-                }
-            });
-        }
-
         renderSummary(meeting.summary);
         renderTranscript(meeting.transcript);
     }

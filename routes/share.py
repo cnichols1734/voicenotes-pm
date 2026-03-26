@@ -13,7 +13,7 @@ from flask_login import login_required, current_user
 from services.supabase_client import get_supabase
 from services.chat_service import stream_chat_response
 from services.action_items import (
-    update_action_item, create_action_item,
+    ensure_action_item_ids, update_action_item, create_action_item,
     get_history as get_action_item_history,
 )
 
@@ -165,6 +165,13 @@ def get_shared_meeting(share_id):
     sb = get_supabase()
     owner = sb.table("users").select("display_name").eq("id", link["user_id"]).execute()
     owner_name = owner.data[0]["display_name"] if owner.data else "Unknown"
+
+    # Backfill stable IDs on action items for existing meetings
+    summary = meeting.get("summary")
+    if summary and ensure_action_item_ids(summary):
+        sb = get_supabase()
+        sb.table("meetings").update({"summary": summary}).eq("id", meeting["id"]).execute()
+        meeting["summary"] = summary
 
     return jsonify({
         "meeting": {
