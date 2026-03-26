@@ -1260,6 +1260,16 @@ select {
   color-scheme: dark;
 }
 
+@media (max-width: 768px) {
+  .deadline-date-input {
+    left: auto;
+    right: 0;
+    width: 160px;
+    max-width: calc(100vw - 32px);
+    font-size: 16px; /* prevents iOS auto-zoom on focus */
+  }
+}
+
 /* Action items count badge */
 .action-items-count {
   display: none;
