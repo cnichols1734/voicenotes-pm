@@ -200,6 +200,8 @@
         return raw;
     }
 
+    var GRIP_ICON_SVG = '<svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor"><circle cx="3" cy="3" r="1.5"/><circle cx="9" cy="3" r="1.5"/><circle cx="3" cy="8" r="1.5"/><circle cx="9" cy="8" r="1.5"/><circle cx="3" cy="13" r="1.5"/><circle cx="9" cy="13" r="1.5"/></svg>';
+
     function renderSharedActionItems(actionsEl, summary) {
         if (!summary.action_items || summary.action_items.length === 0) {
             actionsEl.innerHTML = '<p class="text-secondary">No action items recorded.</p>';
@@ -215,6 +217,7 @@
             var priorityLabel = prio.charAt(0).toUpperCase() + prio.slice(1);
             var priorityClass = ' priority-' + prio;
             return '<div class="action-item' + completedClass + '" data-index="' + idx + '">' +
+                '<div class="action-drag-handle" data-index="' + idx + '">' + GRIP_ICON_SVG + '</div>' +
                 '<div class="action-checkbox' + checked + '" data-index="' + idx + '"></div>' +
                 '<div class="action-item-body">' +
                 '<div class="action-task">' + escapeHtml(item.task) + '</div>' +
@@ -252,9 +255,191 @@
             });
         });
 
+        initSharedDragDrop(actionsEl, summary);
+
         actionsEl.appendChild(buildSharedAddBtn());
         buildSharedHistoryToggle(actionsEl);
         updateSharedCount(summary.action_items);
+    }
+
+    // -----------------------------------------------------------------------
+    // Drag-and-drop reordering for shared view
+    // -----------------------------------------------------------------------
+    var _sharedDndCleanup = null;
+
+    function initSharedDragDrop(container, summary) {
+        if (_sharedDndCleanup) { _sharedDndCleanup(); _sharedDndCleanup = null; }
+
+        var dragState = null;
+
+        function getActionItems() {
+            return Array.from(container.querySelectorAll('.action-item'));
+        }
+
+        function getPointerY(e) {
+            return e.clientY != null ? e.clientY : (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+        }
+
+        function getPointerX(e) {
+            return e.clientX != null ? e.clientX : (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+        }
+
+        function createGhost(sourceEl, x, y) {
+            var ghost = document.createElement('div');
+            ghost.className = 'action-item-ghost';
+            var task = sourceEl.querySelector('.action-task');
+            if (task) ghost.textContent = task.textContent;
+            var rect = sourceEl.getBoundingClientRect();
+            ghost.style.width = rect.width + 'px';
+            ghost.style.left = (x - rect.width / 2) + 'px';
+            ghost.style.top = (y - 20) + 'px';
+            document.body.appendChild(ghost);
+            return ghost;
+        }
+
+        function createDropIndicator() {
+            var ind = document.createElement('div');
+            ind.className = 'action-items-drop-indicator';
+            return ind;
+        }
+
+        function onPointerDown(e) {
+            var handle = e.target.closest('.action-drag-handle');
+            if (!handle) return;
+            var item = handle.closest('.action-item');
+            if (!item || item.classList.contains('editing')) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            var items = getActionItems();
+            var fromIndex = items.indexOf(item);
+            if (fromIndex === -1) return;
+
+            var y = getPointerY(e);
+            var x = getPointerX(e);
+            var rects = items.map(function (el) { return el.getBoundingClientRect(); });
+
+            dragState = {
+                sourceEl: item,
+                fromIndex: fromIndex,
+                toIndex: fromIndex,
+                ghost: createGhost(item, x, y),
+                indicator: createDropIndicator(),
+                rects: rects,
+                items: items,
+                startY: y,
+                active: true,
+            };
+
+            item.classList.add('dragging');
+            document.body.style.userSelect = 'none';
+            document.body.style.webkitUserSelect = 'none';
+        }
+
+        function onPointerMove(e) {
+            if (!dragState || !dragState.active) return;
+            e.preventDefault();
+
+            var y = getPointerY(e);
+            var x = getPointerX(e);
+
+            dragState.ghost.style.left = (x - parseInt(dragState.ghost.style.width) / 2) + 'px';
+            dragState.ghost.style.top = (y - 20) + 'px';
+
+            var newIndex = dragState.fromIndex;
+            var items = dragState.items;
+            for (var i = 0; i < items.length; i++) {
+                var rect = dragState.rects[i];
+                var mid = rect.top + rect.height / 2;
+                if (y < mid) { newIndex = i; break; }
+                newIndex = i + 1;
+            }
+            newIndex = Math.max(0, Math.min(newIndex, items.length));
+
+            if (newIndex !== dragState.toIndex) {
+                dragState.toIndex = newIndex;
+                if (dragState.indicator.parentNode) dragState.indicator.remove();
+                if (newIndex >= items.length) {
+                    var lastItem = items[items.length - 1];
+                    lastItem.parentNode.insertBefore(dragState.indicator, lastItem.nextSibling);
+                } else {
+                    items[newIndex].parentNode.insertBefore(dragState.indicator, items[newIndex]);
+                }
+            }
+
+            items.forEach(function (el, i) {
+                if (el === dragState.sourceEl) return;
+                el.classList.remove('drag-over-above', 'drag-over-below');
+                if (dragState.fromIndex < newIndex) {
+                    if (i > dragState.fromIndex && i < newIndex) el.classList.add('drag-over-above');
+                } else if (dragState.fromIndex > newIndex) {
+                    if (i >= newIndex && i < dragState.fromIndex) el.classList.add('drag-over-below');
+                }
+            });
+        }
+
+        function onPointerUp() {
+            if (!dragState || !dragState.active) return;
+            dragState.active = false;
+
+            var sourceEl = dragState.sourceEl;
+            var fromIndex = dragState.fromIndex;
+            var toIndex = dragState.toIndex;
+            var ghost = dragState.ghost;
+            var indicator = dragState.indicator;
+            var items = dragState.items;
+
+            items.forEach(function (el) { el.classList.remove('drag-over-above', 'drag-over-below'); });
+            sourceEl.classList.remove('dragging');
+            ghost.remove();
+            if (indicator.parentNode) indicator.remove();
+            document.body.style.userSelect = '';
+            document.body.style.webkitUserSelect = '';
+
+            var finalTo = toIndex > fromIndex ? toIndex - 1 : toIndex;
+
+            if (finalTo !== fromIndex && summary.action_items.length > 1) {
+                var moved = summary.action_items.splice(fromIndex, 1)[0];
+                summary.action_items.splice(finalTo, 0, moved);
+                renderSharedActionItems(container, summary);
+                saveSharedActionItemOrder(summary);
+            }
+
+            dragState = null;
+        }
+
+        var touchStartHandler = function (e) {
+            if (e.target.closest('.action-drag-handle')) e.preventDefault();
+        };
+
+        container.addEventListener('pointerdown', onPointerDown);
+        document.addEventListener('pointermove', onPointerMove);
+        document.addEventListener('pointerup', onPointerUp);
+        container.addEventListener('touchstart', touchStartHandler, { passive: false });
+
+        _sharedDndCleanup = function () {
+            container.removeEventListener('pointerdown', onPointerDown);
+            document.removeEventListener('pointermove', onPointerMove);
+            document.removeEventListener('pointerup', onPointerUp);
+            container.removeEventListener('touchstart', touchStartHandler);
+        };
+    }
+
+    async function saveSharedActionItemOrder(summary) {
+        var orderedIds = summary.action_items.map(function (item) { return item.id; }).filter(Boolean);
+        if (orderedIds.length === 0) return;
+        try {
+            var resp = await fetch('/api/share/' + window.SHARE_ID + '/action-items/reorder', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ordered_ids: orderedIds }),
+            });
+            if (!resp.ok) throw new Error('Reorder failed');
+        } catch (err) {
+            console.error('Failed to save action item order:', err);
+            showToast('Failed to save order.', 'error');
+        }
     }
 
     function openSharedEditMode(actionsEl, summary, idx) {

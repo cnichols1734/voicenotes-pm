@@ -124,6 +124,30 @@ def create_action_item(meeting: dict, data: dict,
     return new_item, summary
 
 
+def reorder_action_items(meeting: dict, ordered_ids: list):
+    """
+    Rearrange action_items to match the given ID order.
+    Returns the updated summary.
+    """
+    summary = meeting.get("summary")
+    if not summary or not summary.get("action_items"):
+        raise ValueError("Meeting has no action items")
+
+    ensure_action_item_ids(summary)
+
+    items_by_id = {item["id"]: item for item in summary["action_items"]}
+    reordered = []
+    for item_id in ordered_ids:
+        if item_id in items_by_id:
+            reordered.append(items_by_id.pop(item_id))
+    for remaining in items_by_id.values():
+        reordered.append(remaining)
+
+    summary["action_items"] = reordered
+    _save_summary(meeting["id"], summary)
+    return summary
+
+
 def get_history(meeting_id: str, limit: int = 50):
     """Fetch recent action item history entries for a meeting."""
     sb = get_supabase()

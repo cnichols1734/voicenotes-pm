@@ -14,7 +14,7 @@ from services.summarizer_service import summarize_transcript
 from services.title_service import generate_title
 from services.action_items import (
     ensure_action_item_ids, update_action_item, create_action_item,
-    get_history as get_action_item_history,
+    reorder_action_items, get_history as get_action_item_history,
 )
 
 logger = logging.getLogger(__name__)
@@ -467,6 +467,40 @@ def get_action_items_history(meeting_id):
     except Exception as exc:
         logger.error("Failed to fetch action item history: %s", exc)
         return _supabase_error(f"Failed to fetch history: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/recordings/<meeting_id>/action-items/reorder
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/action-items/reorder", methods=["PUT"])
+@login_required
+def reorder_action_items_route(meeting_id):
+    """Reorder action items for a meeting the user owns."""
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("meetings")
+            .select("*")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .single()
+            .execute()
+        )
+        if not result.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        data = request.get_json(force=True) or {}
+        ordered_ids = data.get("ordered_ids")
+        if not ordered_ids or not isinstance(ordered_ids, list):
+            return jsonify({"error": "ordered_ids array required"}), 400
+
+        summary = reorder_action_items(result.data, ordered_ids)
+        return jsonify({"summary": summary})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logger.error("Failed to reorder action items: %s", exc)
+        return _supabase_error(f"Failed to reorder: {exc}")
 
 
 # ---------------------------------------------------------------------------
