@@ -4290,7 +4290,7 @@ html {
 .meeting-layout {
   display: flex;
   gap: 0;
-  max-width: 1280px;
+  max-width: 1440px;
   margin: 0 auto;
   padding: 0 16px;
 }
@@ -4310,7 +4310,7 @@ html {
    ===================================================== */
 
 .comments-panel {
-  width: 340px;
+  width: 420px;
   flex-shrink: 0;
   position: sticky;
   top: calc(var(--nav-height) + 16px);
@@ -4321,7 +4321,7 @@ html {
   background: var(--bg-tertiary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  margin-top: 40px;
+  margin-top: 0;
   overflow: hidden;
 }
 
@@ -4484,6 +4484,102 @@ html {
 .comment-body b {
   color: var(--text-primary);
   font-weight: 600;
+}
+
+/* Comment actions (edit/delete) */
+
+.comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+
+.comment-item:hover .comment-actions {
+  opacity: 1;
+}
+
+.comment-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  transition: all var(--transition-fast);
+}
+
+.comment-actions button:hover {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.comment-actions .comment-delete-btn:hover {
+  color: var(--accent-danger);
+}
+
+/* Comment edit mode */
+
+.comment-edit-editor {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  min-height: 40px;
+  max-height: 120px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  outline: none;
+  word-break: break-word;
+  margin-left: 32px;
+}
+
+.comment-edit-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  margin-top: 6px;
+  padding-left: 32px;
+}
+
+.comment-edit-actions button {
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: all var(--transition-fast);
+}
+
+.comment-edit-save {
+  background: var(--accent-primary);
+  color: #fff;
+}
+
+.comment-edit-save:hover {
+  background: var(--accent-primary-hover);
+}
+
+.comment-edit-cancel {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.comment-edit-cancel:hover {
+  color: var(--text-primary);
 }
 
 /* Comment new-item flash */
