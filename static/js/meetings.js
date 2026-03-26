@@ -514,23 +514,6 @@ window.MeetingsModule = (() => {
             window.AppState.meetingTypes = types;
             window.AppState.folders = folders;
 
-            // Backfill action item IDs if missing
-            if (meeting.summary && meeting.summary.action_items) {
-                let needsSave = false;
-                meeting.summary.action_items.forEach(item => {
-                    if (!item.id) {
-                        item.id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
-                        needsSave = true;
-                    }
-                });
-                if (needsSave) {
-                    api(`/api/recordings/${meeting.id}`, {
-                        method: 'PUT',
-                        body: { summary: meeting.summary },
-                    }).catch(() => {});
-                }
-            }
-
             renderDetailHeader(meeting, types, folders);
             renderSummary(meeting.summary);
             renderTranscript(meeting.transcript);
