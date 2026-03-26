@@ -1281,21 +1281,6 @@ mark.search-highlight {
   background: rgba(50, 215, 75, 0.15);
 }
 
-/* Inline deadline date picker */
-.deadline-date-input {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 10;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 12px;
-  padding: 4px 8px;
-  color-scheme: dark;
-}
-
 /* Action items count badge */
 .action-items-count {
   display: none;
@@ -1308,46 +1293,96 @@ mark.search-highlight {
   margin-left: 8px;
 }
 
-/* Inline editing for action items */
+/* Action task text (read-only) */
 .action-task {
-  cursor: pointer;
   border-radius: var(--radius-sm);
   padding: 1px 4px;
   margin: -1px -4px;
-  transition: background 0.15s;
 }
 
-.action-task:hover {
-  background: var(--bg-tertiary);
+/* Edit button (pencil icon) on each action item */
+.action-edit-btn {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border: none;
+  background: transparent;
+  color: var(--text-tertiary);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 2px;
+  opacity: 0;
 }
 
-.action-inline-input {
-  width: 100%;
+.action-item:hover .action-edit-btn {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .action-edit-btn {
+    opacity: 1;
+  }
+}
+
+.action-edit-btn:hover {
+  color: var(--accent-primary);
+  background: var(--accent-primary-muted);
+}
+
+.action-edit-btn i,
+.action-edit-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Edit mode form */
+.action-item.editing {
   background: var(--bg-tertiary);
   border: 1px solid var(--accent-primary);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 14px;
-  padding: 4px 8px;
-  outline: none;
-  font-family: inherit;
+  margin: -1px;
 }
 
-.action-pill-input {
-  font-size: 11px;
-  padding: 2px 6px;
-  width: 100px;
-}
-
-/* Expandable task text editor */
-.action-edit-area {
+.action-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   width: 100%;
+}
+
+.action-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.action-edit-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.action-edit-row {
+  display: flex;
+  gap: 12px;
+}
+
+.action-edit-field-half {
+  flex: 1;
+  min-width: 0;
 }
 
 .action-edit-textarea {
   width: 100%;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--accent-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-sm);
   color: var(--text-primary);
   font-size: 14px;
@@ -1357,27 +1392,88 @@ mark.search-highlight {
   line-height: 1.5;
   resize: none;
   overflow: hidden;
-  min-height: 60px;
+  min-height: 40px;
+  transition: border-color var(--transition-fast);
 }
 
+.action-edit-textarea:focus {
+  border-color: var(--accent-primary);
+}
+
+.action-edit-input {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 7px 10px;
+  outline: none;
+  font-family: inherit;
+  transition: border-color var(--transition-fast);
+}
+
+.action-edit-input:focus {
+  border-color: var(--accent-primary);
+}
+
+.action-edit-date {
+  color-scheme: dark;
+}
+
+/* Priority selector row in edit mode */
+.action-edit-priority-row {
+  display: flex;
+  gap: 6px;
+}
+
+.action-edit-priority-opt {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  transition: all var(--transition-fast);
+}
+
+.action-edit-priority-opt.priority-low { color: var(--accent-success); }
+.action-edit-priority-opt.priority-medium { color: var(--accent-warning); }
+.action-edit-priority-opt.priority-high { color: var(--accent-danger); }
+.action-edit-priority-opt.priority-urgent { color: #ff453a; }
+
+.action-edit-priority-opt.active {
+  border-color: currentColor;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.action-edit-priority-opt:hover:not(.active) {
+  background: var(--bg-hover);
+}
+
+/* Save / Cancel buttons in edit form */
 .action-edit-btns {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 2px;
 }
 
 .action-edit-save,
 .action-edit-cancel {
   font-size: 12px;
-  font-weight: 500;
-  padding: 4px 12px;
+  font-weight: 600;
+  padding: 6px 14px;
   border-radius: var(--radius-sm);
   border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
+  transition: all var(--transition-fast);
 }
 
 .action-edit-save {
@@ -1386,109 +1482,19 @@ mark.search-highlight {
 }
 
 .action-edit-save:hover {
-  opacity: 0.9;
+  background: var(--accent-primary-hover);
 }
 
 .action-edit-cancel {
   background: var(--bg-elevated);
   color: var(--text-secondary);
+  border: 1px solid var(--border-default);
 }
 
 .action-edit-cancel:hover {
   color: var(--text-primary);
+  border-color: var(--border-default);
 }
-
-/* Date picker with explicit save/cancel */
-.deadline-picker-wrap {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 10;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  padding: 4px 6px;
-}
-
-.deadline-picker-ok,
-.deadline-picker-clear {
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.deadline-picker-ok {
-  color: var(--accent-success);
-}
-
-.deadline-picker-ok:hover {
-  background: rgba(50, 215, 75, 0.15);
-}
-
-.deadline-picker-clear {
-  color: var(--text-tertiary);
-}
-
-.deadline-picker-clear:hover {
-  color: var(--text-secondary);
-  background: var(--bg-elevated);
-}
-
-/* Priority dropdown */
-.priority-pill.editable-pill {
-  cursor: pointer;
-  position: relative;
-}
-
-.priority-dropdown {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 10;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-md);
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
-  min-width: 100px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.priority-option {
-  border: none;
-  background: none;
-  cursor: pointer;
-  padding: 6px 12px;
-  border-radius: var(--radius-sm);
-  font-size: 12px;
-  font-weight: 500;
-  text-align: left;
-  color: var(--text-primary);
-  transition: background 0.1s;
-}
-
-.priority-option:hover {
-  background: var(--bg-elevated);
-}
-
-.priority-option.active {
-  background: var(--bg-elevated);
-}
-
-.priority-option.priority-low { color: var(--accent-success); }
-.priority-option.priority-medium { color: var(--accent-warning); }
-.priority-option.priority-high { color: var(--accent-danger); }
-.priority-option.priority-urgent { color: #ff453a; font-weight: 700; }
 
 .action-pill.priority-urgent {
   color: #ff453a;
@@ -1496,12 +1502,11 @@ mark.search-highlight {
   font-weight: 700;
 }
 
-.editable-pill {
-  cursor: pointer;
-}
-
-.editable-pill:hover {
-  opacity: 0.8;
+@media (max-width: 480px) {
+  .action-edit-row {
+    flex-direction: column;
+    gap: 10px;
+  }
 }
 
 /* Add action item button */

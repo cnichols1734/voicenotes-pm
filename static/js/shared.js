@@ -217,18 +217,20 @@
             return '<div class="action-item' + completedClass + '" data-index="' + idx + '">' +
                 '<div class="action-checkbox' + checked + '" data-index="' + idx + '"></div>' +
                 '<div class="action-item-body">' +
-                '<div class="action-task" data-index="' + idx + '">' + escapeHtml(item.task) + '</div>' +
+                '<div class="action-task">' + escapeHtml(item.task) + '</div>' +
                 '<div class="action-pills">' +
-                '<span class="action-pill owner editable-pill" data-index="' + idx + '">' +
-                    '<span class="owner-text">' + (item.owner ? escapeHtml(item.owner) : 'Assign') + '</span></span>' +
-                '<span class="action-pill deadline editable-pill" data-index="' + idx + '">' +
+                '<span class="action-pill owner">' +
+                    '<span class="owner-text">' + (item.owner ? escapeHtml(item.owner) : 'Unassigned') + '</span></span>' +
+                '<span class="action-pill deadline">' +
                     '<span class="deadline-text">' + formatDeadlineDisplay(item.deadline) + '</span></span>' +
-                '<span class="action-pill priority-pill editable-pill' + priorityClass + '" data-index="' + idx + '">' +
+                '<span class="action-pill priority-pill' + priorityClass + '">' +
                     '<span class="priority-text">' + priorityLabel + '</span></span>' +
-                '</div></div></div>';
+                '</div></div>' +
+                '<button class="action-edit-btn" data-index="' + idx + '" title="Edit">' +
+                '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>' +
+                '</button></div>';
         }).join('');
 
-        // Checkbox clicks
         actionsEl.querySelectorAll('.action-checkbox').forEach(function (cb) {
             cb.addEventListener('click', function () {
                 var idx = parseInt(cb.dataset.index);
@@ -242,189 +244,119 @@
             });
         });
 
-        // Task text editing — expandable textarea with save button
-        actionsEl.querySelectorAll('.action-task').forEach(function (taskEl) {
-            taskEl.addEventListener('click', function () {
-                if (taskEl.querySelector('.action-edit-area')) return;
-                var idx = parseInt(taskEl.dataset.index);
-                var item = summary.action_items[idx];
-
-                var wrapper = document.createElement('div');
-                wrapper.className = 'action-edit-area';
-
-                var textarea = document.createElement('textarea');
-                textarea.className = 'action-edit-textarea';
-                textarea.value = item.task;
-                textarea.rows = Math.max(2, Math.ceil(item.task.length / 50));
-
-                var btnRow = document.createElement('div');
-                btnRow.className = 'action-edit-btns';
-                var saveBtn = document.createElement('button');
-                saveBtn.className = 'action-edit-save';
-                saveBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Save';
-                var cancelBtn = document.createElement('button');
-                cancelBtn.className = 'action-edit-cancel';
-                cancelBtn.textContent = 'Cancel';
-                btnRow.appendChild(cancelBtn);
-                btnRow.appendChild(saveBtn);
-
-                wrapper.appendChild(textarea);
-                wrapper.appendChild(btnRow);
-                taskEl.textContent = '';
-                taskEl.appendChild(wrapper);
-                textarea.focus();
-
-                function autoGrow() {
-                    textarea.style.height = 'auto';
-                    textarea.style.height = textarea.scrollHeight + 'px';
-                }
-                textarea.addEventListener('input', autoGrow);
-                setTimeout(autoGrow, 0);
-
-                saveBtn.addEventListener('click', function (ev) {
-                    ev.stopPropagation();
-                    var val = textarea.value.trim();
-                    if (val && val !== item.task) {
-                        item.task = val;
-                        patchSharedItem(item.id, { task: val });
-                    }
-                    taskEl.textContent = item.task;
-                });
-
-                cancelBtn.addEventListener('click', function (ev) {
-                    ev.stopPropagation();
-                    taskEl.textContent = item.task;
-                });
-
-                textarea.addEventListener('keydown', function (e) {
-                    if (e.key === 'Escape') { e.stopPropagation(); taskEl.textContent = item.task; }
-                });
-            });
-        });
-
-        // Owner editing
-        actionsEl.querySelectorAll('.action-pill.owner.editable-pill').forEach(function (pill) {
-            pill.addEventListener('click', function (e) {
-                if (e.target.closest('.action-inline-input')) return;
-                var idx = parseInt(pill.dataset.index);
-                var item = summary.action_items[idx];
-                var textEl = pill.querySelector('.owner-text');
-                if (pill.querySelector('.action-inline-input')) return;
-
-                var input = document.createElement('input');
-                input.type = 'text';
-                input.className = 'action-inline-input action-pill-input';
-                input.value = item.owner || '';
-                input.placeholder = 'Owner name';
-                textEl.style.display = 'none';
-                pill.appendChild(input);
-                input.focus();
-                input.select();
-
-                function save() {
-                    var val = input.value.trim();
-                    if (val !== (item.owner || '')) {
-                        item.owner = val;
-                        patchSharedItem(item.id, { owner: val });
-                    }
-                    textEl.textContent = item.owner || 'Assign';
-                    textEl.style.display = '';
-                    input.remove();
-                }
-                input.addEventListener('blur', save);
-                input.addEventListener('keydown', function (e) {
-                    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-                    if (e.key === 'Escape') { textEl.style.display = ''; input.remove(); }
-                });
-            });
-        });
-
-        // Deadline editing — date picker with explicit save/cancel
-        actionsEl.querySelectorAll('.action-pill.deadline.editable-pill').forEach(function (pill) {
-            pill.addEventListener('click', function (e) {
-                if (e.target.closest('.deadline-picker-wrap')) return;
-                var idx = parseInt(pill.dataset.index);
-                var item = summary.action_items[idx];
-                if (pill.querySelector('.deadline-picker-wrap')) return;
-
-                var wrap = document.createElement('div');
-                wrap.className = 'deadline-picker-wrap';
-                var dateInput = document.createElement('input');
-                dateInput.type = 'date';
-                dateInput.className = 'deadline-date-input';
-                dateInput.value = item.deadline && item.deadline !== 'TBD' && /^\d{4}-\d{2}-\d{2}$/.test(item.deadline) ? item.deadline : '';
-
-                var okBtn = document.createElement('button');
-                okBtn.className = 'deadline-picker-ok';
-                okBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
-                okBtn.title = 'Save date';
-
-                var clearBtn = document.createElement('button');
-                clearBtn.className = 'deadline-picker-clear';
-                clearBtn.textContent = '\u2715';
-                clearBtn.title = 'Cancel';
-
-                wrap.appendChild(dateInput);
-                wrap.appendChild(okBtn);
-                wrap.appendChild(clearBtn);
-                pill.appendChild(wrap);
-                dateInput.focus();
-
-                okBtn.addEventListener('click', function (ev) {
-                    ev.stopPropagation();
-                    if (dateInput.value) {
-                        item.deadline = dateInput.value;
-                        pill.querySelector('.deadline-text').textContent = formatDeadlineDisplay(dateInput.value);
-                        patchSharedItem(item.id, { deadline: dateInput.value });
-                    }
-                    wrap.remove();
-                });
-
-                clearBtn.addEventListener('click', function (ev) {
-                    ev.stopPropagation();
-                    wrap.remove();
-                });
-            });
-        });
-
-        // Priority picklist
-        actionsEl.querySelectorAll('.action-pill.priority-pill.editable-pill').forEach(function (pill) {
-            pill.addEventListener('click', function (e) {
-                if (e.target.closest('.priority-dropdown')) return;
-                if (pill.querySelector('.priority-dropdown')) return;
-                var idx = parseInt(pill.dataset.index);
-                var item = summary.action_items[idx];
-
-                var dd = document.createElement('div');
-                dd.className = 'priority-dropdown';
-                PRIORITY_OPTIONS.forEach(function (opt) {
-                    var btn = document.createElement('button');
-                    btn.className = 'priority-option priority-' + opt + (opt === (item.priority || 'medium') ? ' active' : '');
-                    btn.textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
-                    btn.addEventListener('click', function (ev) {
-                        ev.stopPropagation();
-                        if (opt !== (item.priority || 'medium')) {
-                            item.priority = opt;
-                            pill.className = 'action-pill priority-pill editable-pill priority-' + opt;
-                            pill.querySelector('.priority-text').textContent = opt.charAt(0).toUpperCase() + opt.slice(1);
-                            patchSharedItem(item.id, { priority: opt });
-                        }
-                        dd.remove();
-                    });
-                    dd.appendChild(btn);
-                });
-                pill.appendChild(dd);
-
-                var closeDd = function (ev) {
-                    if (!pill.contains(ev.target)) { dd.remove(); document.removeEventListener('click', closeDd); }
-                };
-                setTimeout(function () { document.addEventListener('click', closeDd); }, 0);
+        actionsEl.querySelectorAll('.action-edit-btn').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var idx = parseInt(btn.dataset.index);
+                openSharedEditMode(actionsEl, summary, idx);
             });
         });
 
         actionsEl.appendChild(buildSharedAddBtn());
         buildSharedHistoryToggle(actionsEl);
         updateSharedCount(summary.action_items);
+    }
+
+    function openSharedEditMode(actionsEl, summary, idx) {
+        var item = summary.action_items[idx];
+        var row = actionsEl.querySelector('.action-item[data-index="' + idx + '"]');
+        if (!row || row.classList.contains('editing')) return;
+
+        row.classList.add('editing');
+        var editBtn = row.querySelector('.action-edit-btn');
+        if (editBtn) editBtn.style.display = 'none';
+
+        var body = row.querySelector('.action-item-body');
+        var origHtml = body.innerHTML;
+
+        var prio = item.priority || 'medium';
+        var deadlineVal = (item.deadline && item.deadline !== 'TBD' && /^\d{4}-\d{2}-\d{2}$/.test(item.deadline)) ? item.deadline : '';
+
+        body.innerHTML =
+          '<div class="action-edit-form">' +
+            '<div class="action-edit-field">' +
+              '<label class="action-edit-label">Task</label>' +
+              '<textarea class="action-edit-textarea" rows="2">' + escapeHtml(item.task) + '</textarea>' +
+            '</div>' +
+            '<div class="action-edit-row">' +
+              '<div class="action-edit-field action-edit-field-half">' +
+                '<label class="action-edit-label">Owner</label>' +
+                '<input type="text" class="action-edit-input" value="' + escapeHtml(item.owner || '') + '" placeholder="Assign owner" data-field="owner" />' +
+              '</div>' +
+              '<div class="action-edit-field action-edit-field-half">' +
+                '<label class="action-edit-label">Deadline</label>' +
+                '<input type="date" class="action-edit-input action-edit-date" value="' + deadlineVal + '" data-field="deadline" />' +
+              '</div>' +
+            '</div>' +
+            '<div class="action-edit-field">' +
+              '<label class="action-edit-label">Priority</label>' +
+              '<div class="action-edit-priority-row">' +
+                PRIORITY_OPTIONS.map(function (opt) {
+                    return '<button type="button" class="action-edit-priority-opt priority-' + opt + (opt === prio ? ' active' : '') + '" data-value="' + opt + '">' + opt.charAt(0).toUpperCase() + opt.slice(1) + '</button>';
+                }).join('') +
+              '</div>' +
+            '</div>' +
+            '<div class="action-edit-btns">' +
+              '<button class="action-edit-cancel">Cancel</button>' +
+              '<button class="action-edit-save"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Save</button>' +
+            '</div>' +
+          '</div>';
+
+        var textarea = body.querySelector('.action-edit-textarea');
+        function autoGrow() { textarea.style.height = 'auto'; textarea.style.height = textarea.scrollHeight + 'px'; }
+        textarea.addEventListener('input', autoGrow);
+        setTimeout(autoGrow, 0);
+
+        var selectedPriority = prio;
+        body.querySelectorAll('.action-edit-priority-opt').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                body.querySelectorAll('.action-edit-priority-opt').forEach(function (b) { b.classList.remove('active'); });
+                btn.classList.add('active');
+                selectedPriority = btn.dataset.value;
+            });
+        });
+
+        function closeEdit() {
+            row.classList.remove('editing');
+            body.innerHTML = origHtml;
+            if (editBtn) editBtn.style.display = '';
+        }
+
+        body.querySelector('.action-edit-cancel').addEventListener('click', function (e) {
+            e.stopPropagation();
+            closeEdit();
+        });
+
+        body.querySelector('.action-edit-save').addEventListener('click', async function (e) {
+            e.stopPropagation();
+            var newTask = textarea.value.trim();
+            var newOwner = body.querySelector('[data-field="owner"]').value.trim();
+            var newDeadline = body.querySelector('[data-field="deadline"]').value;
+
+            var updates = {};
+            if (newTask && newTask !== item.task) { updates.task = newTask; item.task = newTask; }
+            if (newOwner !== (item.owner || '')) { updates.owner = newOwner; item.owner = newOwner; }
+            if (newDeadline !== (item.deadline || '')) { updates.deadline = newDeadline || ''; item.deadline = newDeadline || ''; }
+            if (selectedPriority !== (item.priority || 'medium')) { updates.priority = selectedPriority; item.priority = selectedPriority; }
+
+            var fields = Object.keys(updates);
+            if (fields.length > 0) {
+                for (var i = 0; i < fields.length; i++) {
+                    var obj = {};
+                    obj[fields[i]] = updates[fields[i]];
+                    await patchSharedItem(item.id, obj);
+                }
+                renderSharedActionItems(actionsEl, summary);
+                showToast('Action item saved.', 'success');
+            } else {
+                closeEdit();
+            }
+        });
+
+        textarea.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') { e.stopPropagation(); closeEdit(); }
+        });
     }
 
     function buildSharedAddBtn() {
