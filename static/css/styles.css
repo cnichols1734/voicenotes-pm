@@ -1343,30 +1343,6 @@ mark.search-highlight {
   background: rgba(50, 215, 75, 0.15);
 }
 
-/* Inline deadline date picker */
-.deadline-date-input {
-  position: absolute;
-  top: calc(100% + 4px);
-  left: 0;
-  z-index: 10;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 12px;
-  padding: 4px 8px;
-  color-scheme: dark;
-}
-
-@media (max-width: 768px) {
-  .deadline-date-input {
-    left: auto;
-    right: 0;
-    width: 160px;
-    max-width: calc(100vw - 32px);
-    font-size: 16px; /* prevents iOS auto-zoom on focus */
-  }
-}
 /* Action items count badge */
 .action-items-count {
   display: none;
@@ -1499,6 +1475,7 @@ mark.search-highlight {
   text-align: left;
   display: block;
   max-width: 100%;
+  font-size: 16px; /* prevents iOS auto-zoom on focus */
 }
 .action-edit-date::-webkit-datetime-edit,
 .action-edit-date::-webkit-datetime-edit-fields-wrapper {
@@ -1607,19 +1584,21 @@ mark.search-highlight {
   font-weight: 700;
 }
 
-@media (max-width: 480px) {
-  .action-item.editing .action-item-body { padding: 14px 14px; }
+@media (max-width: 768px) {
   .action-edit-row {
     flex-direction: column;
     gap: 14px;
     align-items: stretch;
   }
-  /* Side-by-side columns become stacked; full width like task/owner text fields */
   .action-edit-row .action-edit-field-half {
     flex: 0 0 auto;
     width: 100%;
     max-width: 100%;
   }
+}
+
+@media (max-width: 480px) {
+  .action-item.editing .action-item-body { padding: 14px 14px; }
   .action-edit-btns {
     justify-content: stretch;
   }
