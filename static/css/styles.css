@@ -1741,6 +1741,130 @@ mark.search-highlight {
 }
 
 /* =====================================================
+   Presence Bubbles (Google Docs-style viewer indicators)
+   ===================================================== */
+.detail-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.presence-bubbles {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+  padding-top: 6px;
+  min-height: 32px;
+}
+
+.presence-bubble {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  border: 2px solid var(--bg-primary);
+  margin-left: -6px;
+  position: relative;
+  cursor: default;
+  animation: presenceFadeIn 0.3s ease-out;
+  transition: transform 0.15s ease;
+}
+
+.presence-bubble:first-child {
+  margin-left: 0;
+}
+
+.presence-bubble:hover {
+  transform: scale(1.15);
+  z-index: 2;
+}
+
+.presence-tooltip {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  box-shadow: var(--shadow-md);
+  z-index: 10;
+}
+
+.presence-bubble:hover .presence-tooltip {
+  opacity: 1;
+}
+
+.presence-tooltip::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--border-default);
+}
+
+.presence-viewer-count {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border: 2px solid var(--bg-primary);
+  margin-left: -6px;
+  cursor: default;
+}
+
+@keyframes presenceFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Update indicator dot on the presence area */
+.presence-update-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-success);
+  animation: presencePulse 1.5s ease-in-out;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+@keyframes presencePulse {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.4); }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+/* =====================================================
    Meeting Detail Page
    ===================================================== */
 .detail-page {

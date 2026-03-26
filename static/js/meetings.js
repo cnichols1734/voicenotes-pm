@@ -5,11 +5,17 @@
 
 window.MeetingsModule = (() => {
     let allMeetings = [];
-    let currentMeeting = null; // module-scoped for action item persistence
-    let openSwipeRow = null;   // track the currently-open swipe row
-    let fetchGeneration = 0;   // ignore stale list responses when search input changes quickly
+    let currentMeeting = null;
+    let openSwipeRow = null;
+    let fetchGeneration = 0;
     let searchDebounceTimer = null;
     const SEARCH_DEBOUNCE_MS = 320;
+
+    // Presence & live-update polling state
+    let presenceInterval = null;
+    let lastKnownUpdatedAt = null;
+    const HEARTBEAT_INTERVAL_MS = 5000;
+    const MAX_PRESENCE_BUBBLES = 4;
 
     function getEl(id) { return document.getElementById(id); }
 
@@ -508,6 +514,7 @@ window.MeetingsModule = (() => {
 
             const meeting = meetingData.meeting;
             currentMeeting = meeting;
+            lastKnownUpdatedAt = meeting.updated_at;
             const types = typesData.meeting_types || [];
             const folders = foldersData.folders || [];
 
@@ -520,10 +527,11 @@ window.MeetingsModule = (() => {
             populateDetailFolderSelect(folders, meeting.folder_id);
             populateResurfaceGrid(types);
 
-            // Init chat if meeting is complete
             if (meeting.status === 'complete' && window.ChatModule) {
                 window.ChatModule.init(meetingId);
             }
+
+            startPresencePolling(meetingId);
         } catch (err) {
             showToast(`Failed to load meeting: ${err.message}`, 'error');
         }
@@ -1411,6 +1419,123 @@ window.MeetingsModule = (() => {
             );
         } catch (_) {
             return safe;
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Presence polling & live updates
+    // ---------------------------------------------------------------------------
+    function startPresencePolling(meetingId) {
+        if (presenceInterval) clearInterval(presenceInterval);
+
+        sendHeartbeat(meetingId);
+        presenceInterval = setInterval(() => sendHeartbeat(meetingId), HEARTBEAT_INTERVAL_MS);
+
+        window.addEventListener('beforeunload', () => {
+            clearInterval(presenceInterval);
+            const url = `/api/presence/${meetingId}/leave`;
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon(url, '{}');
+            } else {
+                fetch(url, { method: 'POST', keepalive: true });
+            }
+        });
+    }
+
+    async function sendHeartbeat(meetingId) {
+        try {
+            const data = await api(`/api/presence/${meetingId}/heartbeat`, { method: 'POST' });
+            renderPresenceBubbles(data.viewers || []);
+
+            if (lastKnownUpdatedAt && data.meeting_updated_at && data.meeting_updated_at !== lastKnownUpdatedAt) {
+                lastKnownUpdatedAt = data.meeting_updated_at;
+                await refreshMeetingData(meetingId);
+            }
+        } catch (_) {
+            // Heartbeat failures are non-critical
+        }
+    }
+
+    async function refreshMeetingData(meetingId) {
+        try {
+            const meetingData = await api(`/api/recordings/${meetingId}`);
+            const meeting = meetingData.meeting;
+            currentMeeting = meeting;
+            lastKnownUpdatedAt = meeting.updated_at;
+
+            renderSummary(meeting.summary);
+            renderTranscript(meeting.transcript);
+
+            const titleEl = getEl('meeting-title');
+            if (titleEl && !titleEl.matches(':focus') && titleEl.textContent !== meeting.title) {
+                titleEl.textContent = meeting.title;
+            }
+
+            showUpdateFlash();
+        } catch (_) {
+            // Non-critical
+        }
+    }
+
+    function showUpdateFlash() {
+        const container = getEl('presence-bubbles');
+        if (!container) return;
+        const existing = container.querySelector('.presence-update-dot');
+        if (existing) existing.remove();
+        const dot = document.createElement('div');
+        dot.className = 'presence-update-dot';
+        container.appendChild(dot);
+        dot.addEventListener('animationend', () => dot.remove());
+    }
+
+    function renderPresenceBubbles(viewers) {
+        const container = getEl('presence-bubbles');
+        if (!container) return;
+
+        const shown = viewers.slice(0, MAX_PRESENCE_BUBBLES);
+        const overflow = viewers.length - shown.length;
+
+        const currentIds = new Set(shown.map(v => v.viewer_id));
+        container.querySelectorAll('.presence-bubble').forEach(el => {
+            if (!currentIds.has(el.dataset.viewerId)) el.remove();
+        });
+        const overflowEl = container.querySelector('.presence-viewer-count');
+        if (overflowEl && overflow <= 0) overflowEl.remove();
+
+        shown.forEach(viewer => {
+            let bubble = container.querySelector(`.presence-bubble[data-viewer-id="${viewer.viewer_id}"]`);
+            if (!bubble) {
+                bubble = document.createElement('div');
+                bubble.className = 'presence-bubble';
+                bubble.dataset.viewerId = viewer.viewer_id;
+                const tooltip = document.createElement('span');
+                tooltip.className = 'presence-tooltip';
+                bubble.appendChild(tooltip);
+                const updateDot = container.querySelector('.presence-update-dot');
+                if (updateDot) {
+                    container.insertBefore(bubble, updateDot);
+                } else {
+                    container.appendChild(bubble);
+                }
+            }
+            bubble.style.backgroundColor = viewer.color;
+            bubble.childNodes[0].textContent = viewer.initials;
+            bubble.querySelector('.presence-tooltip').textContent = viewer.display_name;
+        });
+
+        if (overflow > 0) {
+            let countEl = container.querySelector('.presence-viewer-count');
+            if (!countEl) {
+                countEl = document.createElement('div');
+                countEl.className = 'presence-viewer-count';
+                const updateDot = container.querySelector('.presence-update-dot');
+                if (updateDot) {
+                    container.insertBefore(countEl, updateDot);
+                } else {
+                    container.appendChild(countEl);
+                }
+            }
+            countEl.textContent = `+${overflow}`;
         }
     }
 
