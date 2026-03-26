@@ -12,6 +12,10 @@ from services.supabase_client import get_supabase
 from services.whisper_service import transcribe_audio
 from services.summarizer_service import summarize_transcript
 from services.title_service import generate_title
+from services.action_items import (
+    ensure_action_item_ids, update_action_item, create_action_item,
+    get_history as get_action_item_history,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -357,6 +361,106 @@ def update_recording(meeting_id):
     except Exception as exc:
         logger.error("Failed to update meeting %s: %s", meeting_id, exc)
         return _supabase_error(f"Failed to update meeting: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/recordings/<meeting_id>/action-items/<item_id>
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/action-items/<item_id>", methods=["PATCH"])
+@login_required
+def patch_action_item(meeting_id, item_id):
+    """Update a single action item (task, owner, deadline, completed)."""
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("meetings")
+            .select("*")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .single()
+            .execute()
+        )
+        if not result.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        meeting = result.data
+        data = request.get_json(force=True) or {}
+        summary = update_action_item(
+            meeting, item_id, data,
+            changed_by_type="user",
+            changed_by_user_id=str(current_user.id),
+            changed_by_name=current_user.display_name,
+        )
+        return jsonify({"summary": summary})
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logger.error("Failed to update action item: %s", exc)
+        return _supabase_error(f"Failed to update action item: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# POST /api/recordings/<meeting_id>/action-items
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/action-items", methods=["POST"])
+@login_required
+def post_action_item(meeting_id):
+    """Create a new action item on a meeting."""
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("meetings")
+            .select("*")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .single()
+            .execute()
+        )
+        if not result.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        meeting = result.data
+        data = request.get_json(force=True) or {}
+        new_item, summary = create_action_item(
+            meeting, data,
+            changed_by_type="user",
+            changed_by_user_id=str(current_user.id),
+            changed_by_name=current_user.display_name,
+        )
+        return jsonify({"item": new_item, "summary": summary}), 201
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logger.error("Failed to create action item: %s", exc)
+        return _supabase_error(f"Failed to create action item: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# GET /api/recordings/<meeting_id>/action-items/history
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/action-items/history", methods=["GET"])
+@login_required
+def get_action_items_history(meeting_id):
+    """Fetch action item change history for a meeting the user owns."""
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("meetings")
+            .select("id")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .execute()
+        )
+        if not result.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        history = get_action_item_history(meeting_id)
+        return jsonify({"history": history})
+    except Exception as exc:
+        logger.error("Failed to fetch action item history: %s", exc)
+        return _supabase_error(f"Failed to fetch history: {exc}")
 
 
 # ---------------------------------------------------------------------------

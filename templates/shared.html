@@ -3,8 +3,11 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <meta name="description" content="Shared meeting summary - VoiceNotez" />
-    <title>Shared Meeting - VoiceNotez</title>
+    <meta name="description" content="{{ meeting_title }} - Shared meeting summary on VoiceNotez" />
+    <meta property="og:title" content="{{ meeting_title }} - VoiceNotez" />
+    <meta property="og:description" content="View the shared meeting summary for {{ meeting_title }}" />
+    <meta property="og:type" content="article" />
+    <title>{{ meeting_title }} - VoiceNotez</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}?v={{ cache_bust }}" />
 </head>
 <body>
