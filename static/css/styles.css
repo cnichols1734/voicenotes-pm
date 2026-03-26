@@ -1468,6 +1468,7 @@ mark.search-highlight {
 
 .action-edit-date {
   color-scheme: dark;
+  text-align: left;
 }
 .action-edit-date:not(:focus):invalid,
 .action-edit-date[value=""] {
@@ -1573,10 +1574,6 @@ mark.search-highlight {
 
 @media (max-width: 480px) {
   .action-item.editing .action-item-body { padding: 14px 14px; }
-  .action-edit-row {
-    flex-direction: column;
-    gap: 14px;
-  }
   .action-edit-btns {
     justify-content: stretch;
   }
