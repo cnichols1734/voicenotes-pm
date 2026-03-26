@@ -637,8 +637,6 @@ window.MeetingsModule = (() => {
 
     const PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent'];
 
-    const GRIP_ICON_SVG = '<svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor"><circle cx="3" cy="3" r="1.5"/><circle cx="9" cy="3" r="1.5"/><circle cx="3" cy="8" r="1.5"/><circle cx="9" cy="8" r="1.5"/><circle cx="3" cy="13" r="1.5"/><circle cx="9" cy="13" r="1.5"/></svg>';
-
     function renderActionItems(actionsEl, summary) {
         if (!summary.action_items || summary.action_items.length === 0) {
             actionsEl.innerHTML = '<p class="text-secondary">No action items recorded.</p>';
@@ -656,7 +654,6 @@ window.MeetingsModule = (() => {
             const itemId = item.id || idx;
             return `
           <div class="action-item${completedClass}" data-item-id="${escapeHtml(String(itemId))}" data-index="${idx}">
-            <div class="action-drag-handle" data-index="${idx}">${GRIP_ICON_SVG}</div>
             <div class="action-checkbox${checked}" data-index="${idx}"></div>
             <div class="action-item-body">
               <div class="action-task">${escapeHtml(item.task)}</div>
@@ -666,14 +663,13 @@ window.MeetingsModule = (() => {
                 <span class="action-pill priority-pill${priorityClass}"><span class="priority-text">${priorityLabel}</span></span>
               </div>
             </div>
-            <button class="action-edit-btn" data-index="${idx}" title="Edit">
-              <i data-lucide="pencil"></i>
-            </button>
+            <span class="action-item-hint">tap to edit &middot; hold to reorder</span>
           </div>`;
         }).join('');
 
         actionsEl.querySelectorAll('.action-checkbox').forEach(cb => {
-            cb.addEventListener('click', () => {
+            cb.addEventListener('click', (e) => {
+                e.stopPropagation();
                 const idx = parseInt(cb.dataset.index);
                 const item = summary.action_items[idx];
                 const newVal = !item.completed;
@@ -685,15 +681,7 @@ window.MeetingsModule = (() => {
             });
         });
 
-        actionsEl.querySelectorAll('.action-edit-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const idx = parseInt(btn.dataset.index);
-                openActionItemEditMode(actionsEl, summary, idx);
-            });
-        });
-
-        initActionItemDragDrop(actionsEl, summary);
+        initActionItemInteractions(actionsEl, summary);
 
         actionsEl.appendChild(buildAddActionItemBtn());
         buildHistoryToggle(actionsEl);
@@ -702,13 +690,15 @@ window.MeetingsModule = (() => {
     }
 
     // -----------------------------------------------------------------------
-    // Drag-and-drop reordering (pointer events: works on desktop + mobile)
+    // Long-press to drag, tap to edit (pointer events: desktop + mobile)
     // -----------------------------------------------------------------------
+    const LONG_PRESS_MS = 400;
     let _dndCleanup = null;
 
-    function initActionItemDragDrop(container, summary) {
+    function initActionItemInteractions(container, summary) {
         if (_dndCleanup) { _dndCleanup(); _dndCleanup = null; }
 
+        let pressState = null;
         let dragState = null;
 
         function getActionItems() {
@@ -716,11 +706,11 @@ window.MeetingsModule = (() => {
         }
 
         function getPointerY(e) {
-            return e.clientY ?? (e.touches && e.touches[0] ? e.touches[0].clientY : 0);
+            return e.clientY ?? 0;
         }
 
         function getPointerX(e) {
-            return e.clientX ?? (e.touches && e.touches[0] ? e.touches[0].clientX : 0);
+            return e.clientX ?? 0;
         }
 
         function createGhost(sourceEl, x, y) {
@@ -742,21 +732,18 @@ window.MeetingsModule = (() => {
             return ind;
         }
 
-        function onPointerDown(e) {
-            const handle = e.target.closest('.action-drag-handle');
-            if (!handle) return;
-            const item = handle.closest('.action-item');
-            if (!item || item.classList.contains('editing')) return;
+        function cancelPress() {
+            if (pressState) {
+                clearTimeout(pressState.timer);
+                if (pressState.item) pressState.item.classList.remove('drag-ready');
+                pressState = null;
+            }
+        }
 
-            e.preventDefault();
-            e.stopPropagation();
-
+        function startDrag(item, x, y) {
             const items = getActionItems();
             const fromIndex = items.indexOf(item);
             if (fromIndex === -1) return;
-
-            const y = getPointerY(e);
-            const x = getPointerX(e);
 
             const rects = items.map(el => el.getBoundingClientRect());
 
@@ -768,16 +755,52 @@ window.MeetingsModule = (() => {
                 indicator: createDropIndicator(),
                 rects,
                 items,
-                startY: y,
                 active: true,
             };
 
+            item.classList.remove('drag-ready');
             item.classList.add('dragging');
             document.body.style.userSelect = 'none';
             document.body.style.webkitUserSelect = 'none';
         }
 
+        function onPointerDown(e) {
+            if (dragState) return;
+            const item = e.target.closest('.action-item');
+            if (!item || item.classList.contains('editing')) return;
+            if (e.target.closest('.action-checkbox')) return;
+
+            const x = getPointerX(e);
+            const y = getPointerY(e);
+
+            pressState = {
+                item,
+                startX: x,
+                startY: y,
+                moved: false,
+                timer: setTimeout(() => {
+                    if (!pressState || pressState.moved) return;
+                    item.classList.add('drag-ready');
+                    if (navigator.vibrate) navigator.vibrate(30);
+                    setTimeout(() => {
+                        if (!pressState) return;
+                        startDrag(item, pressState.startX, pressState.startY);
+                        pressState = null;
+                    }, 100);
+                }, LONG_PRESS_MS),
+            };
+        }
+
         function onPointerMove(e) {
+            if (pressState && !pressState.moved) {
+                const dx = getPointerX(e) - pressState.startX;
+                const dy = getPointerY(e) - pressState.startY;
+                if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+                    pressState.moved = true;
+                    cancelPress();
+                }
+            }
+
             if (!dragState || !dragState.active) return;
             e.preventDefault();
 
@@ -792,10 +815,7 @@ window.MeetingsModule = (() => {
             for (let i = 0; i < items.length; i++) {
                 const rect = dragState.rects[i];
                 const mid = rect.top + rect.height / 2;
-                if (y < mid) {
-                    newIndex = i;
-                    break;
-                }
+                if (y < mid) { newIndex = i; break; }
                 newIndex = i + 1;
             }
             newIndex = Math.max(0, Math.min(newIndex, items.length));
@@ -822,45 +842,79 @@ window.MeetingsModule = (() => {
             });
         }
 
-        async function onPointerUp() {
-            if (!dragState || !dragState.active) return;
-            dragState.active = false;
+        async function onPointerUp(e) {
+            const wasDragging = dragState && dragState.active;
+            const wasPressed = pressState && !pressState.moved;
 
-            const { sourceEl, fromIndex, toIndex, ghost, indicator, items } = dragState;
+            if (dragState && dragState.active) {
+                dragState.active = false;
+                const { sourceEl, fromIndex, toIndex, ghost, indicator, items } = dragState;
 
-            items.forEach(el => el.classList.remove('drag-over-above', 'drag-over-below'));
-            sourceEl.classList.remove('dragging');
-            ghost.remove();
-            if (indicator.parentNode) indicator.remove();
-            document.body.style.userSelect = '';
-            document.body.style.webkitUserSelect = '';
+                items.forEach(el => el.classList.remove('drag-over-above', 'drag-over-below'));
+                sourceEl.classList.remove('dragging');
+                ghost.remove();
+                if (indicator.parentNode) indicator.remove();
+                document.body.style.userSelect = '';
+                document.body.style.webkitUserSelect = '';
 
-            const finalTo = toIndex > fromIndex ? toIndex - 1 : toIndex;
-
-            if (finalTo !== fromIndex && summary.action_items.length > 1) {
-                const [moved] = summary.action_items.splice(fromIndex, 1);
-                summary.action_items.splice(finalTo, 0, moved);
-                renderActionItems(container, summary);
-                await saveActionItemOrder(summary);
+                const finalTo = toIndex > fromIndex ? toIndex - 1 : toIndex;
+                if (finalTo !== fromIndex && summary.action_items.length > 1) {
+                    const [moved] = summary.action_items.splice(fromIndex, 1);
+                    summary.action_items.splice(finalTo, 0, moved);
+                    renderActionItems(container, summary);
+                    await saveActionItemOrder(summary);
+                }
+                dragState = null;
             }
 
-            dragState = null;
+            if (wasPressed && !wasDragging) {
+                const item = pressState.item;
+                cancelPress();
+                if (item && !item.classList.contains('editing')) {
+                    const idx = parseInt(item.dataset.index);
+                    if (!isNaN(idx)) openActionItemEditMode(container, summary, idx);
+                }
+            } else {
+                cancelPress();
+            }
+        }
+
+        function onPointerCancel() {
+            cancelPress();
+            if (dragState && dragState.active) {
+                dragState.active = false;
+                dragState.items.forEach(el => el.classList.remove('drag-over-above', 'drag-over-below'));
+                dragState.sourceEl.classList.remove('dragging', 'drag-ready');
+                dragState.ghost.remove();
+                if (dragState.indicator.parentNode) dragState.indicator.remove();
+                document.body.style.userSelect = '';
+                document.body.style.webkitUserSelect = '';
+                dragState = null;
+            }
         }
 
         const touchStartHandler = (e) => {
-            if (e.target.closest('.action-drag-handle')) e.preventDefault();
+            if (e.target.closest('.action-item') && !e.target.closest('.action-checkbox') && !e.target.closest('.action-edit-form')) {
+                // Don't prevent default immediately -- let the long-press timer decide
+            }
+        };
+
+        const touchMoveHandler = (e) => {
+            if (dragState && dragState.active) e.preventDefault();
         };
 
         container.addEventListener('pointerdown', onPointerDown);
         document.addEventListener('pointermove', onPointerMove);
         document.addEventListener('pointerup', onPointerUp);
-        container.addEventListener('touchstart', touchStartHandler, { passive: false });
+        document.addEventListener('pointercancel', onPointerCancel);
+        container.addEventListener('touchmove', touchMoveHandler, { passive: false });
 
         _dndCleanup = () => {
             container.removeEventListener('pointerdown', onPointerDown);
             document.removeEventListener('pointermove', onPointerMove);
             document.removeEventListener('pointerup', onPointerUp);
-            container.removeEventListener('touchstart', touchStartHandler);
+            document.removeEventListener('pointercancel', onPointerCancel);
+            container.removeEventListener('touchmove', touchMoveHandler);
         };
     }
 
