@@ -126,6 +126,17 @@
 
         startPresencePolling();
         initSharedComments();
+        alignCommentsPanel();
+    }
+
+    function alignCommentsPanel() {
+        var panel = getEl('comments-panel');
+        var tabs = document.querySelector('.meeting-main .tabs');
+        var layout = document.querySelector('.meeting-layout');
+        if (!panel || !tabs || !layout) return;
+        var layoutTop = layout.getBoundingClientRect().top + window.scrollY;
+        var tabsTop = tabs.getBoundingClientRect().top + window.scrollY;
+        panel.style.marginTop = (tabsTop - layoutTop) + 'px';
     }
 
     // ---------------------------------------------------------------------------
@@ -1235,7 +1246,13 @@
 
         var shouldScroll = false;
         comments.forEach(function (c) {
-            if (!existingIds[c.id]) {
+            var existing = listEl.querySelector('.comment-item[data-comment-id="' + c.id + '"]');
+            if (existing) {
+                var bodyEl = existing.querySelector('.comment-body');
+                if (bodyEl && bodyEl.innerHTML !== c.content) bodyEl.innerHTML = c.content;
+                var timeEl = existing.querySelector('.comment-time');
+                if (timeEl) timeEl.textContent = commentTimeAgo(c.created_at);
+            } else {
                 var item = renderCommentItem(c);
                 item.classList.add('comment-new');
                 listEl.appendChild(item);
@@ -1246,13 +1263,6 @@
         if (shouldScroll) {
             listEl.scrollTop = listEl.scrollHeight;
         }
-
-        listEl.querySelectorAll('.comment-item').forEach(function (el, i) {
-            if (comments[i]) {
-                var timeEl = el.querySelector('.comment-time');
-                if (timeEl) timeEl.textContent = commentTimeAgo(comments[i].created_at);
-            }
-        });
     }
 
     function getSharedCommenterName() {
@@ -1325,6 +1335,10 @@
         commentsInterval = setInterval(fetchSharedComments, COMMENTS_POLL_MS);
     }
 
+    function commentsFingerprint(comments) {
+        return comments.map(function (c) { return c.id + ':' + (c.content || '').length; }).join(',');
+    }
+
     async function fetchSharedComments() {
         var shareId = window.SHARE_ID;
         if (!shareId) return;
@@ -1333,9 +1347,9 @@
             if (!resp.ok) return;
             var data = await resp.json();
             var comments = data.comments || [];
-            var latestId = comments.length ? comments[comments.length - 1].id : null;
-            if (latestId !== lastKnownCommentId) {
-                lastKnownCommentId = latestId;
+            var fp = commentsFingerprint(comments);
+            if (fp !== lastKnownCommentId) {
+                lastKnownCommentId = fp;
                 renderCommentsList(comments);
             }
         } catch (_) {
