@@ -514,6 +514,23 @@ window.MeetingsModule = (() => {
             window.AppState.meetingTypes = types;
             window.AppState.folders = folders;
 
+            // Backfill action item IDs if missing
+            if (meeting.summary && meeting.summary.action_items) {
+                let needsSave = false;
+                meeting.summary.action_items.forEach(item => {
+                    if (!item.id) {
+                        item.id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+                        needsSave = true;
+                    }
+                });
+                if (needsSave) {
+                    api(`/api/recordings/${meeting.id}`, {
+                        method: 'PUT',
+                        body: { summary: meeting.summary },
+                    }).catch(() => {});
+                }
+            }
+
             renderDetailHeader(meeting, types, folders);
             renderSummary(meeting.summary);
             renderTranscript(meeting.transcript);
@@ -578,74 +595,7 @@ window.MeetingsModule = (() => {
         // Action items
         const actionsEl = getEl('action-items-list');
         if (actionsEl && summary.action_items) {
-            if (summary.action_items.length === 0) {
-                actionsEl.innerHTML = '<p class="text-secondary">No action items recorded.</p>';
-            } else {
-                actionsEl.innerHTML = summary.action_items.map((item, idx) => {
-                    const checked = item.completed ? ' checked' : '';
-                    const completedClass = item.completed ? ' completed' : '';
-                    const priorityLabel = item.priority ? item.priority.charAt(0).toUpperCase() + item.priority.slice(1) : '';
-                    const priorityClass = item.priority ? ` priority-${item.priority}` : '';
-                    return `
-          <div class="action-item${completedClass}" data-index="${idx}">
-            <div class="action-checkbox${checked}" data-index="${idx}"></div>
-            <div class="action-item-body">
-              <div class="action-task">${escapeHtml(item.task)}</div>
-              <div class="action-pills">
-                ${item.owner ? `<span class="action-pill owner"><i data-lucide="user"></i> ${escapeHtml(item.owner)}</span>` : ''}
-                ${item.deadline ? `<span class="action-pill deadline" data-index="${idx}"><i data-lucide="calendar"></i> <span class="deadline-text">${escapeHtml(item.deadline)}</span></span>` : ''}
-                ${item.priority ? `<span class="action-pill priority-pill${priorityClass}">${priorityLabel}</span>` : ''}
-              </div>
-            </div>
-          </div>`;
-                }).join('');
-
-                // Bind checkbox clicks
-                actionsEl.querySelectorAll('.action-checkbox').forEach(cb => {
-                    cb.addEventListener('click', () => {
-                        const idx = parseInt(cb.dataset.index);
-                        const item = summary.action_items[idx];
-                        item.completed = !item.completed;
-                        cb.classList.toggle('checked');
-                        cb.closest('.action-item').classList.toggle('completed');
-                        updateActionItemsCount(summary.action_items);
-                        saveActionItems();
-                    });
-                });
-
-                // Bind deadline pill clicks for inline date editing
-                actionsEl.querySelectorAll('.action-pill.deadline').forEach(pill => {
-                    pill.addEventListener('click', (e) => {
-                        if (e.target.closest('.deadline-date-input')) return;
-                        const idx = parseInt(pill.dataset.index);
-                        const item = summary.action_items[idx];
-                        const existing = pill.querySelector('.deadline-date-input');
-                        if (existing) { existing.remove(); return; }
-
-                        const dateInput = document.createElement('input');
-                        dateInput.type = 'date';
-                        dateInput.className = 'deadline-date-input';
-                        dateInput.value = item.deadline && item.deadline !== 'TBD' && /^\d{4}-\d{2}-\d{2}$/.test(item.deadline) ? item.deadline : '';
-                        pill.appendChild(dateInput);
-                        dateInput.focus();
-
-                        dateInput.addEventListener('change', () => {
-                            if (dateInput.value) {
-                                item.deadline = dateInput.value;
-                                pill.querySelector('.deadline-text').textContent = dateInput.value;
-                            }
-                            dateInput.remove();
-                            saveActionItems();
-                        });
-
-                        dateInput.addEventListener('blur', () => {
-                            setTimeout(() => dateInput.remove(), 150);
-                        });
-                    });
-                });
-
-                updateActionItemsCount(summary.action_items);
-            }
+            renderActionItems(actionsEl, summary);
         }
 
         // Decisions
@@ -681,6 +631,260 @@ window.MeetingsModule = (() => {
         if (window.lucide) lucide.createIcons();
     }
 
+    // ---------------------------------------------------------------------------
+    // Action items: rendering, inline editing, add, history
+    // ---------------------------------------------------------------------------
+    function renderActionItems(actionsEl, summary) {
+        if (!summary.action_items || summary.action_items.length === 0) {
+            actionsEl.innerHTML = '<p class="text-secondary">No action items recorded.</p>';
+            // Still show add button
+            actionsEl.appendChild(buildAddActionItemBtn());
+            updateActionItemsCount(summary.action_items || []);
+            return;
+        }
+
+        actionsEl.innerHTML = summary.action_items.map((item, idx) => {
+            const checked = item.completed ? ' checked' : '';
+            const completedClass = item.completed ? ' completed' : '';
+            const priorityLabel = item.priority ? item.priority.charAt(0).toUpperCase() + item.priority.slice(1) : '';
+            const priorityClass = item.priority ? ` priority-${item.priority}` : '';
+            const itemId = item.id || idx;
+            return `
+          <div class="action-item${completedClass}" data-item-id="${escapeHtml(String(itemId))}" data-index="${idx}">
+            <div class="action-checkbox${checked}" data-index="${idx}"></div>
+            <div class="action-item-body">
+              <div class="action-task" data-index="${idx}">${escapeHtml(item.task)}</div>
+              <div class="action-pills">
+                <span class="action-pill owner editable-pill" data-index="${idx}"><i data-lucide="user"></i> <span class="owner-text">${item.owner ? escapeHtml(item.owner) : 'Assign'}</span></span>
+                <span class="action-pill deadline editable-pill" data-index="${idx}"><i data-lucide="calendar"></i> <span class="deadline-text">${item.deadline ? escapeHtml(item.deadline) : 'Set date'}</span></span>
+                ${item.priority ? `<span class="action-pill priority-pill${priorityClass}">${priorityLabel}</span>` : ''}
+              </div>
+            </div>
+          </div>`;
+        }).join('');
+
+        // Checkbox clicks
+        actionsEl.querySelectorAll('.action-checkbox').forEach(cb => {
+            cb.addEventListener('click', () => {
+                const idx = parseInt(cb.dataset.index);
+                const item = summary.action_items[idx];
+                const newVal = !item.completed;
+                item.completed = newVal;
+                cb.classList.toggle('checked');
+                cb.closest('.action-item').classList.toggle('completed');
+                updateActionItemsCount(summary.action_items);
+                patchActionItem(item.id, { completed: newVal });
+            });
+        });
+
+        // Inline task text editing
+        actionsEl.querySelectorAll('.action-task').forEach(taskEl => {
+            taskEl.addEventListener('click', () => {
+                if (taskEl.querySelector('.action-inline-input')) return;
+                const idx = parseInt(taskEl.dataset.index);
+                const item = summary.action_items[idx];
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'action-inline-input';
+                input.value = item.task;
+                taskEl.textContent = '';
+                taskEl.appendChild(input);
+                input.focus();
+                input.select();
+
+                const save = () => {
+                    const val = input.value.trim();
+                    if (val && val !== item.task) {
+                        item.task = val;
+                        patchActionItem(item.id, { task: val });
+                    }
+                    taskEl.textContent = item.task;
+                };
+                input.addEventListener('blur', save);
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+                    if (e.key === 'Escape') { taskEl.textContent = item.task; }
+                });
+            });
+        });
+
+        // Inline owner editing
+        actionsEl.querySelectorAll('.action-pill.owner.editable-pill').forEach(pill => {
+            pill.addEventListener('click', (e) => {
+                if (e.target.closest('.action-inline-input')) return;
+                const idx = parseInt(pill.dataset.index);
+                const item = summary.action_items[idx];
+                const textEl = pill.querySelector('.owner-text');
+                if (pill.querySelector('.action-inline-input')) return;
+
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'action-inline-input action-pill-input';
+                input.value = item.owner || '';
+                input.placeholder = 'Owner name';
+                textEl.style.display = 'none';
+                pill.appendChild(input);
+                input.focus();
+                input.select();
+
+                const save = () => {
+                    const val = input.value.trim();
+                    if (val !== (item.owner || '')) {
+                        item.owner = val;
+                        patchActionItem(item.id, { owner: val });
+                    }
+                    textEl.textContent = item.owner || 'Assign';
+                    textEl.style.display = '';
+                    input.remove();
+                };
+                input.addEventListener('blur', save);
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+                    if (e.key === 'Escape') { textEl.style.display = ''; input.remove(); }
+                });
+            });
+        });
+
+        // Inline deadline editing
+        actionsEl.querySelectorAll('.action-pill.deadline.editable-pill').forEach(pill => {
+            pill.addEventListener('click', (e) => {
+                if (e.target.closest('.deadline-date-input')) return;
+                const idx = parseInt(pill.dataset.index);
+                const item = summary.action_items[idx];
+                if (pill.querySelector('.deadline-date-input')) return;
+
+                const dateInput = document.createElement('input');
+                dateInput.type = 'date';
+                dateInput.className = 'deadline-date-input';
+                dateInput.value = item.deadline && item.deadline !== 'TBD' && /^\d{4}-\d{2}-\d{2}$/.test(item.deadline) ? item.deadline : '';
+                pill.appendChild(dateInput);
+                dateInput.focus();
+
+                dateInput.addEventListener('change', () => {
+                    if (dateInput.value) {
+                        item.deadline = dateInput.value;
+                        pill.querySelector('.deadline-text').textContent = dateInput.value;
+                        patchActionItem(item.id, { deadline: dateInput.value });
+                    }
+                    dateInput.remove();
+                });
+                dateInput.addEventListener('blur', () => {
+                    setTimeout(() => dateInput.remove(), 150);
+                });
+            });
+        });
+
+        // Add action item button
+        actionsEl.appendChild(buildAddActionItemBtn());
+
+        // History toggle
+        buildHistoryToggle(actionsEl);
+
+        updateActionItemsCount(summary.action_items);
+        if (window.lucide) lucide.createIcons();
+    }
+
+    function buildAddActionItemBtn() {
+        const btn = document.createElement('button');
+        btn.className = 'add-action-item-btn';
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add action item';
+        btn.addEventListener('click', async () => {
+            if (!currentMeeting) return;
+            try {
+                const data = await api(`/api/recordings/${currentMeeting.id}/action-items`, {
+                    method: 'POST',
+                    body: { task: 'New action item', owner: '', deadline: '', priority: 'medium' },
+                });
+                currentMeeting.summary = data.summary;
+                const actionsEl = getEl('action-items-list');
+                if (actionsEl) renderActionItems(actionsEl, currentMeeting.summary);
+                showToast('Action item added.', 'success');
+            } catch (err) {
+                showToast('Failed to add action item.', 'error');
+            }
+        });
+        return btn;
+    }
+
+    async function patchActionItem(itemId, updates) {
+        if (!currentMeeting || !itemId) return;
+        try {
+            await api(`/api/recordings/${currentMeeting.id}/action-items/${itemId}`, {
+                method: 'PATCH',
+                body: updates,
+            });
+        } catch (err) {
+            console.error('Failed to save action item:', err);
+            showToast('Failed to save changes.', 'error');
+        }
+    }
+
+    function buildHistoryToggle(container) {
+        const toggle = document.createElement('button');
+        toggle.className = 'action-history-toggle';
+        toggle.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> View changes';
+        let historyEl = null;
+        let loaded = false;
+
+        toggle.addEventListener('click', async () => {
+            if (historyEl && historyEl.style.display !== 'none') {
+                historyEl.style.display = 'none';
+                toggle.classList.remove('active');
+                return;
+            }
+            if (!historyEl) {
+                historyEl = document.createElement('div');
+                historyEl.className = 'action-history-list';
+                container.appendChild(historyEl);
+            }
+            historyEl.style.display = 'block';
+            toggle.classList.add('active');
+
+            if (!loaded) {
+                historyEl.innerHTML = '<div class="action-history-loading">Loading...</div>';
+                try {
+                    const data = await api(`/api/recordings/${currentMeeting.id}/action-items/history`);
+                    renderHistory(historyEl, data.history || []);
+                    loaded = true;
+                } catch (err) {
+                    historyEl.innerHTML = '<div class="action-history-empty">Failed to load history.</div>';
+                }
+            }
+        });
+        container.appendChild(toggle);
+    }
+
+    function renderHistory(el, entries) {
+        if (!entries.length) {
+            el.innerHTML = '<div class="action-history-empty">No changes yet.</div>';
+            return;
+        }
+        el.innerHTML = entries.map(e => {
+            const isUser = e.changed_by_type === 'user';
+            const dotClass = isUser ? 'history-dot-user' : 'history-dot-shared';
+            const name = e.changed_by_name || (isUser ? 'User' : 'Shared link user');
+            const time = new Date(e.created_at).toLocaleString('en-US', {
+                month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+            });
+            let desc = '';
+            if (e.field_changed === 'created') {
+                desc = `added "<span class="history-value">${escapeHtml(e.new_value || '')}</span>"`;
+            } else if (e.field_changed === 'completed') {
+                desc = e.new_value === 'True' ? 'marked as done' : 'marked as not done';
+            } else {
+                desc = `changed ${e.field_changed}`;
+                if (e.old_value) desc += ` from "<span class="history-value">${escapeHtml(e.old_value)}</span>"`;
+                desc += ` to "<span class="history-value">${escapeHtml(e.new_value || '')}</span>"`;
+            }
+            return `<div class="action-history-entry">
+                <span class="history-dot ${dotClass}"></span>
+                <span class="history-name">${escapeHtml(name)}</span>
+                <span class="history-desc">${desc}</span>
+                <span class="history-time">${time}</span>
+            </div>`;
+        }).join('');
+    }
+
     function updateActionItemsCount(actionItems) {
         const countEl = getEl('action-items-count');
         if (!countEl || !actionItems) return;
@@ -691,19 +895,6 @@ window.MeetingsModule = (() => {
             countEl.style.display = 'inline-block';
         } else {
             countEl.style.display = 'none';
-        }
-    }
-
-    async function saveActionItems() {
-        if (!currentMeeting || !currentMeeting.summary) return;
-        try {
-            await api(`/api/recordings/${currentMeeting.id}`, {
-                method: 'PUT',
-                body: { summary: currentMeeting.summary },
-            });
-        } catch (err) {
-            console.error('Failed to save action items:', err);
-            showToast('Failed to save changes.', 'error');
         }
     }
 

@@ -12,6 +12,10 @@ from flask_login import login_required, current_user
 
 from services.supabase_client import get_supabase
 from services.chat_service import stream_chat_response
+from services.action_items import (
+    update_action_item, create_action_item,
+    get_history as get_action_item_history,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +131,11 @@ def shared_page(share_id):
     link = _get_share_link(share_id)
     if not link:
         return render_template("shared_404.html"), 404
-    return render_template("shared.html", share_id=share_id)
+
+    meeting = _get_meeting_by_id(link["meeting_id"])
+    meeting_title = meeting["title"] if meeting else "Shared Meeting"
+
+    return render_template("shared.html", share_id=share_id, meeting_title=meeting_title)
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +179,75 @@ def get_shared_meeting(share_id):
         },
         "shared_by": owner_name,
     })
+
+
+# ---------------------------------------------------------------------------
+# Public: action item editing via share link
+# ---------------------------------------------------------------------------
+
+@share_bp.route("/api/share/<share_id>/action-items/<item_id>", methods=["PATCH"])
+def patch_shared_action_item(share_id, item_id):
+    """Update an action item via a shared link (no auth required)."""
+    link = _get_share_link(share_id)
+    if not link:
+        return jsonify({"error": "Share link not found or expired"}), 404
+
+    meeting = _get_meeting_by_id(link["meeting_id"])
+    if not meeting:
+        return jsonify({"error": "Meeting not found"}), 404
+
+    data = request.get_json(force=True) or {}
+    try:
+        summary = update_action_item(
+            meeting, item_id, data,
+            changed_by_type="shared",
+            changed_by_name="Shared link user",
+        )
+        return jsonify({"summary": summary})
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logger.error("Failed to update shared action item: %s", exc)
+        return jsonify({"error": f"Failed to update: {exc}"}), 503
+
+
+@share_bp.route("/api/share/<share_id>/action-items", methods=["POST"])
+def post_shared_action_item(share_id):
+    """Create a new action item via a shared link (no auth required)."""
+    link = _get_share_link(share_id)
+    if not link:
+        return jsonify({"error": "Share link not found or expired"}), 404
+
+    meeting = _get_meeting_by_id(link["meeting_id"])
+    if not meeting:
+        return jsonify({"error": "Meeting not found"}), 404
+
+    data = request.get_json(force=True) or {}
+    try:
+        new_item, summary = create_action_item(
+            meeting, data,
+            changed_by_type="shared",
+            changed_by_name="Shared link user",
+        )
+        return jsonify({"item": new_item, "summary": summary}), 201
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logger.error("Failed to create shared action item: %s", exc)
+        return jsonify({"error": f"Failed to create: {exc}"}), 503
+
+
+@share_bp.route("/api/share/<share_id>/action-items/history", methods=["GET"])
+def get_shared_action_items_history(share_id):
+    """Fetch action item history via a shared link."""
+    link = _get_share_link(share_id)
+    if not link:
+        return jsonify({"error": "Share link not found or expired"}), 404
+
+    history = get_action_item_history(link["meeting_id"])
+    return jsonify({"history": history})
 
 
 # ---------------------------------------------------------------------------
