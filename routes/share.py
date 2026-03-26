@@ -7,6 +7,7 @@ All AI calls proxy through the backend so API keys are never exposed.
 import json
 import logging
 
+import bleach
 from flask import Blueprint, Response, jsonify, render_template, request, stream_with_context
 from flask_login import login_required, current_user
 
@@ -16,6 +17,8 @@ from services.action_items import (
     ensure_action_item_ids, update_action_item, create_action_item,
     reorder_action_items, get_history as get_action_item_history,
 )
+
+COMMENT_ALLOWED_TAGS = ["b", "i", "em", "strong", "ul", "ol", "li", "br", "p"]
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +285,64 @@ def get_shared_action_items_history(share_id):
 
     history = get_action_item_history(link["meeting_id"])
     return jsonify({"history": history})
+
+
+# ---------------------------------------------------------------------------
+# Public: comments via share link
+# ---------------------------------------------------------------------------
+
+@share_bp.route("/api/share/<share_id>/comments", methods=["GET"])
+def get_shared_comments(share_id):
+    """List comments for a shared meeting."""
+    link = _get_share_link(share_id)
+    if not link:
+        return jsonify({"error": "Share link not found or expired"}), 404
+
+    sb = get_supabase()
+    result = (
+        sb.table("meeting_comments")
+        .select("*")
+        .eq("meeting_id", link["meeting_id"])
+        .order("created_at")
+        .execute()
+    )
+    return jsonify({"comments": result.data or []})
+
+
+@share_bp.route("/api/share/<share_id>/comments", methods=["POST"])
+def post_shared_comment(share_id):
+    """Create a comment via a shared link (no auth required)."""
+    link = _get_share_link(share_id)
+    if not link:
+        return jsonify({"error": "Share link not found or expired"}), 404
+
+    data = request.get_json(force=True) or {}
+    raw_content = (data.get("content") or "").strip()
+    if not raw_content:
+        return jsonify({"error": "Comment content is required"}), 400
+
+    clean_content = bleach.clean(raw_content, tags=COMMENT_ALLOWED_TAGS, strip=True)
+    if not clean_content.strip():
+        return jsonify({"error": "Comment content is required"}), 400
+
+    commenter_name = (data.get("commenter_name") or "").strip() or "Shared User"
+
+    sb = get_supabase()
+    try:
+        result = (
+            sb.table("meeting_comments")
+            .insert({
+                "meeting_id": link["meeting_id"],
+                "commenter_type": "shared",
+                "commenter_name": commenter_name,
+                "content": clean_content,
+            })
+            .execute()
+        )
+        return jsonify({"comment": result.data[0]}), 201
+    except Exception as exc:
+        logger.error("Failed to create shared comment: %s", exc)
+        return jsonify({"error": f"Failed to create comment: {exc}"}), 503
 
 
 # ---------------------------------------------------------------------------

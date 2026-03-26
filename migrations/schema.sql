@@ -296,6 +296,22 @@ CREATE INDEX idx_presence_meeting ON meeting_presence(meeting_id);
 CREATE INDEX idx_presence_last_seen ON meeting_presence(last_seen_at);
 
 -- ============================================
+-- MEETING COMMENTS
+-- Collaborative comments on meetings
+-- ============================================
+CREATE TABLE meeting_comments (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    commenter_type TEXT NOT NULL CHECK (commenter_type IN ('user', 'shared')),
+    user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    commenter_name TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_comments_meeting ON meeting_comments(meeting_id, created_at);
+
+-- ============================================
 -- NOTE: Default meeting types are seeded per-user
 -- on first registration via services/seed_defaults.py
 -- ============================================

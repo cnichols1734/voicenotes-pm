@@ -18,6 +18,9 @@ window.RecorderModule = (() => {
 
     // ---- State ----
     let stream = null;
+    window.addEventListener('beforeunload', () => {
+        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    });
     let mediaRecorder = null;
     let audioChunks = [];          // chunks for current segment
     let timerInterval = null;
@@ -104,7 +107,9 @@ window.RecorderModule = (() => {
         timerEl = getEl('recording-timer');
 
         try {
-            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            if (!stream || stream.getTracks().some(t => t.readyState === 'ended')) {
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            }
         } catch (err) {
             showToast('Microphone access denied. Please allow microphone permission and try again.', 'error');
             closeOverlay();
@@ -283,8 +288,7 @@ window.RecorderModule = (() => {
                     await new Promise(r => setTimeout(r, 200));
                 }
 
-                // Clean up audio stream
-                if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+                // Clean up audio context (stream is kept alive for reuse)
                 if (audioContext) { audioContext.close(); audioContext = null; }
 
                 // Create the meeting with the full accumulated transcript
@@ -292,7 +296,6 @@ window.RecorderModule = (() => {
             };
             mediaRecorder.stop();
         } else {
-            if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
             if (audioContext) { audioContext.close(); audioContext = null; }
             createMeetingWithTranscript();
         }
@@ -346,7 +349,6 @@ window.RecorderModule = (() => {
         timerInterval = null;
         cancelAnimationFrame(animFrameId);
         animFrameId = null;
-        if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
         if (audioContext) { audioContext.close(); audioContext = null; }
         window.removeEventListener('beforeunload', beforeUnloadHandler);
     }

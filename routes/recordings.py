@@ -5,6 +5,7 @@ import logging
 import uuid
 from datetime import datetime
 
+import bleach
 from flask import Blueprint, jsonify, request
 from flask_login import login_required, current_user
 
@@ -16,6 +17,8 @@ from services.action_items import (
     ensure_action_item_ids, update_action_item, create_action_item,
     reorder_action_items, get_history as get_action_item_history,
 )
+
+COMMENT_ALLOWED_TAGS = ["b", "i", "em", "strong", "ul", "ol", "li", "br", "p"]
 
 logger = logging.getLogger(__name__)
 
@@ -517,3 +520,80 @@ def delete_recording(meeting_id):
     except Exception as exc:
         logger.error("Failed to delete meeting %s: %s", meeting_id, exc)
         return _supabase_error(f"Failed to delete meeting: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# GET /api/recordings/<meeting_id>/comments
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/comments", methods=["GET"])
+@login_required
+def get_comments(meeting_id):
+    """List comments for a meeting the user owns."""
+    try:
+        supabase = get_supabase()
+        meeting = (
+            supabase.table("meetings")
+            .select("id")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .execute()
+        )
+        if not meeting.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        result = (
+            supabase.table("meeting_comments")
+            .select("*")
+            .eq("meeting_id", meeting_id)
+            .order("created_at")
+            .execute()
+        )
+        return jsonify({"comments": result.data or []})
+    except Exception as exc:
+        logger.error("Failed to fetch comments: %s", exc)
+        return _supabase_error(f"Failed to fetch comments: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# POST /api/recordings/<meeting_id>/comments
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/comments", methods=["POST"])
+@login_required
+def post_comment(meeting_id):
+    """Create a comment on a meeting the user owns."""
+    try:
+        supabase = get_supabase()
+        meeting = (
+            supabase.table("meetings")
+            .select("id")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .execute()
+        )
+        if not meeting.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        data = request.get_json(force=True) or {}
+        raw_content = (data.get("content") or "").strip()
+        if not raw_content:
+            return jsonify({"error": "Comment content is required"}), 400
+
+        clean_content = bleach.clean(raw_content, tags=COMMENT_ALLOWED_TAGS, strip=True)
+        if not clean_content.strip():
+            return jsonify({"error": "Comment content is required"}), 400
+
+        result = (
+            supabase.table("meeting_comments")
+            .insert({
+                "meeting_id": meeting_id,
+                "commenter_type": "user",
+                "user_id": str(current_user.id),
+                "commenter_name": current_user.display_name,
+                "content": clean_content,
+            })
+            .execute()
+        )
+        return jsonify({"comment": result.data[0]}), 201
+    except Exception as exc:
+        logger.error("Failed to create comment: %s", exc)
+        return _supabase_error(f"Failed to create comment: {exc}")

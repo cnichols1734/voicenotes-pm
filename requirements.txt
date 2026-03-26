@@ -8,4 +8,5 @@ requests
 python-dotenv
 pydub
 bcrypt
+bleach
 pytest
