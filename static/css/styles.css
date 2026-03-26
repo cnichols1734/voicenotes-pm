@@ -1448,6 +1448,7 @@ mark.search-highlight {
 
 .action-edit-input {
   width: 100%;
+  min-width: 0;
   box-sizing: border-box;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
@@ -1472,6 +1473,13 @@ mark.search-highlight {
 .action-edit-date {
   color-scheme: dark;
   text-align: left;
+  display: block;
+  max-width: 100%;
+}
+.action-edit-date::-webkit-datetime-edit,
+.action-edit-date::-webkit-datetime-edit-fields-wrapper {
+  width: 100%;
+  min-width: 0;
 }
 .action-edit-date:not(:focus):invalid,
 .action-edit-date[value=""] {
@@ -1580,6 +1588,13 @@ mark.search-highlight {
   .action-edit-row {
     flex-direction: column;
     gap: 14px;
+    align-items: stretch;
+  }
+  /* Side-by-side columns become stacked; full width like task/owner text fields */
+  .action-edit-row .action-edit-field-half {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: 100%;
   }
   .action-edit-btns {
     justify-content: stretch;
