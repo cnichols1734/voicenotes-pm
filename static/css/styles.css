@@ -1478,12 +1478,22 @@ mark.search-highlight {
   max-width: 100%;
   min-width: 0;
   min-inline-size: 0;
+  min-height: 44px;
+  line-height: 1.2;
+  -webkit-appearance: textfield;
+  appearance: textfield;
   font-size: 16px; /* prevents iOS auto-zoom on focus */
 }
 .action-edit-date::-webkit-datetime-edit,
 .action-edit-date::-webkit-datetime-edit-fields-wrapper {
   width: 100%;
   min-width: 0;
+  padding: 0;
+  line-height: 1.2;
+}
+.action-edit-date::-webkit-datetime-edit {
+  display: block;
+  margin: 0;
 }
 .action-edit-date::-webkit-date-and-time-value {
   min-width: 0;
