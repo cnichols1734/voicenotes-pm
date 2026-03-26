@@ -597,3 +597,87 @@ def post_comment(meeting_id):
     except Exception as exc:
         logger.error("Failed to create comment: %s", exc)
         return _supabase_error(f"Failed to create comment: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/recordings/<meeting_id>/comments/<comment_id>
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/comments/<comment_id>", methods=["PATCH"])
+@login_required
+def patch_comment(meeting_id, comment_id):
+    """Edit a comment. Only the comment author can edit their own comment."""
+    try:
+        supabase = get_supabase()
+        meeting = (
+            supabase.table("meetings")
+            .select("id")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .execute()
+        )
+        if not meeting.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        comment = (
+            supabase.table("meeting_comments")
+            .select("*")
+            .eq("id", comment_id)
+            .eq("meeting_id", meeting_id)
+            .execute()
+        )
+        if not comment.data:
+            return jsonify({"error": "Comment not found"}), 404
+
+        c = comment.data[0]
+        if c.get("user_id") != str(current_user.id):
+            return jsonify({"error": "You can only edit your own comments"}), 403
+
+        data = request.get_json(force=True) or {}
+        raw_content = (data.get("content") or "").strip()
+        if not raw_content:
+            return jsonify({"error": "Comment content is required"}), 400
+
+        clean_content = bleach.clean(raw_content, tags=COMMENT_ALLOWED_TAGS, strip=True)
+        if not clean_content.strip():
+            return jsonify({"error": "Comment content is required"}), 400
+
+        result = (
+            supabase.table("meeting_comments")
+            .update({"content": clean_content})
+            .eq("id", comment_id)
+            .execute()
+        )
+        return jsonify({"comment": result.data[0]})
+    except Exception as exc:
+        logger.error("Failed to update comment: %s", exc)
+        return _supabase_error(f"Failed to update comment: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# DELETE /api/recordings/<meeting_id>/comments/<comment_id>
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/comments/<comment_id>", methods=["DELETE"])
+@login_required
+def delete_comment(meeting_id, comment_id):
+    """
+    Delete a comment. The meeting owner can delete any comment on their meeting.
+    """
+    try:
+        supabase = get_supabase()
+        meeting = (
+            supabase.table("meetings")
+            .select("id")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .execute()
+        )
+        if not meeting.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        supabase.table("meeting_comments").delete().eq(
+            "id", comment_id
+        ).eq("meeting_id", meeting_id).execute()
+        return jsonify({"message": "Comment deleted"})
+    except Exception as exc:
+        logger.error("Failed to delete comment: %s", exc)
+        return _supabase_error(f"Failed to delete comment: {exc}")

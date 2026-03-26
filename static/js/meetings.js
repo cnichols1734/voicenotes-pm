@@ -20,6 +20,7 @@ window.MeetingsModule = (() => {
     // Comments polling state
     let commentsInterval = null;
     let lastKnownCommentId = null;
+    let currentUserId = null;
     const COMMENTS_POLL_MS = 5000;
 
     function getEl(id) { return document.getElementById(id); }
@@ -519,6 +520,7 @@ window.MeetingsModule = (() => {
 
             const meeting = meetingData.meeting;
             currentMeeting = meeting;
+            currentUserId = meeting.user_id;
             lastKnownUpdatedAt = meeting.updated_at;
             const types = typesData.meeting_types || [];
             const folders = foldersData.folders || [];
@@ -538,6 +540,7 @@ window.MeetingsModule = (() => {
 
             startPresencePolling(meetingId);
             initComments(meetingId);
+            alignCommentsPanel();
         } catch (err) {
             showToast(`Failed to load meeting: ${err.message}`, 'error');
         }
@@ -1763,11 +1766,35 @@ window.MeetingsModule = (() => {
         div.dataset.commentId = c.id;
         const color = commentColorFor(c.commenter_name);
         const initials = commentInitials(c.commenter_name);
+
+        const isOwn = c.user_id && c.user_id === currentUserId;
+
+        let actionsHtml = '';
+        if (isOwn) {
+            actionsHtml =
+                '<div class="comment-actions">' +
+                    '<button class="comment-edit-btn" title="Edit">' +
+                        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>' +
+                    '</button>' +
+                    '<button class="comment-delete-btn" title="Delete">' +
+                        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' +
+                    '</button>' +
+                '</div>';
+        } else {
+            actionsHtml =
+                '<div class="comment-actions">' +
+                    '<button class="comment-delete-btn" title="Delete">' +
+                        '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>' +
+                    '</button>' +
+                '</div>';
+        }
+
         div.innerHTML =
             '<div class="comment-header">' +
                 '<span class="comment-avatar" style="background:' + color + '">' + initials + '</span>' +
                 '<span class="comment-author">' + escapeHtml(c.commenter_name) + '</span>' +
                 '<span class="comment-time">' + commentTimeAgo(c.created_at) + '</span>' +
+                actionsHtml +
             '</div>' +
             '<div class="comment-body">' + c.content + '</div>';
         return div;
@@ -1792,6 +1819,7 @@ window.MeetingsModule = (() => {
         const existingIds = new Set();
         listEl.querySelectorAll('.comment-item').forEach(el => existingIds.add(el.dataset.commentId));
 
+        // Remove deleted comments
         const newIds = new Set(comments.map(c => c.id));
         listEl.querySelectorAll('.comment-item').forEach(el => {
             if (!newIds.has(el.dataset.commentId)) el.remove();
@@ -1799,7 +1827,16 @@ window.MeetingsModule = (() => {
 
         let shouldScroll = false;
         comments.forEach(c => {
-            if (!existingIds.has(c.id)) {
+            const existing = listEl.querySelector(`.comment-item[data-comment-id="${c.id}"]`);
+            if (existing) {
+                // Skip items being edited
+                if (existing.querySelector('.comment-edit-editor')) return;
+                // Update content and timestamp in place
+                const bodyEl = existing.querySelector('.comment-body');
+                if (bodyEl && bodyEl.innerHTML !== c.content) bodyEl.innerHTML = c.content;
+                const timeEl = existing.querySelector('.comment-time');
+                if (timeEl) timeEl.textContent = commentTimeAgo(c.created_at);
+            } else {
                 const item = renderCommentItem(c);
                 item.classList.add('comment-new');
                 listEl.appendChild(item);
@@ -1810,20 +1847,13 @@ window.MeetingsModule = (() => {
         if (shouldScroll) {
             listEl.scrollTop = listEl.scrollHeight;
         }
-
-        // Update relative timestamps
-        listEl.querySelectorAll('.comment-item').forEach((el, i) => {
-            if (comments[i]) {
-                const timeEl = el.querySelector('.comment-time');
-                if (timeEl) timeEl.textContent = commentTimeAgo(comments[i].created_at);
-            }
-        });
     }
 
     function initComments(meetingId) {
         const editor = getEl('comments-editor');
         const sendBtn = getEl('comments-send-btn');
         const toolbar = getEl('comments-toolbar');
+        const listEl = getEl('comments-list');
         if (!editor || !sendBtn) return;
 
         // Toolbar commands
@@ -1846,7 +1876,6 @@ window.MeetingsModule = (() => {
             });
         }
 
-        // Enable/disable send button based on editor content
         function checkEditorContent() {
             const hasContent = editor.textContent.trim().length > 0;
             sendBtn.disabled = !hasContent;
@@ -1856,7 +1885,6 @@ window.MeetingsModule = (() => {
         editor.addEventListener('keyup', updateToolbarState);
         editor.addEventListener('mouseup', updateToolbarState);
 
-        // Ctrl+Enter to post
         editor.addEventListener('keydown', function (e) {
             if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                 e.preventDefault();
@@ -1868,21 +1896,47 @@ window.MeetingsModule = (() => {
             postComment(meetingId);
         });
 
-        // Initial load
+        // Edit / delete delegation
+        if (listEl) {
+            listEl.addEventListener('click', function (e) {
+                const editBtn = e.target.closest('.comment-edit-btn');
+                const deleteBtn = e.target.closest('.comment-delete-btn');
+                const saveBtn = e.target.closest('.comment-edit-save');
+                const cancelBtn = e.target.closest('.comment-edit-cancel');
+
+                if (editBtn) {
+                    const item = editBtn.closest('.comment-item');
+                    if (item) startEditComment(item);
+                } else if (deleteBtn) {
+                    const item = deleteBtn.closest('.comment-item');
+                    if (item) deleteComment(meetingId, item.dataset.commentId);
+                } else if (saveBtn) {
+                    const item = saveBtn.closest('.comment-item');
+                    if (item) saveEditComment(meetingId, item);
+                } else if (cancelBtn) {
+                    const item = cancelBtn.closest('.comment-item');
+                    if (item) cancelEditComment(item);
+                }
+            });
+        }
+
         fetchComments(meetingId);
 
-        // Start polling
         if (commentsInterval) clearInterval(commentsInterval);
         commentsInterval = setInterval(() => fetchComments(meetingId), COMMENTS_POLL_MS);
+    }
+
+    function commentsFingerprint(comments) {
+        return comments.map(c => c.id + ':' + (c.content || '').length).join(',');
     }
 
     async function fetchComments(meetingId) {
         try {
             const data = await api(`/api/recordings/${meetingId}/comments`);
             const comments = data.comments || [];
-            const latestId = comments.length ? comments[comments.length - 1].id : null;
-            if (latestId !== lastKnownCommentId) {
-                lastKnownCommentId = latestId;
+            const fp = commentsFingerprint(comments);
+            if (fp !== lastKnownCommentId) {
+                lastKnownCommentId = fp;
                 renderCommentsList(comments);
             }
         } catch (_) {
@@ -1910,6 +1964,98 @@ window.MeetingsModule = (() => {
         } catch (err) {
             showToast('Failed to post comment: ' + err.message, 'error');
             sendBtn.disabled = false;
+        }
+    }
+
+    function alignCommentsPanel() {
+        const panel = getEl('comments-panel');
+        const tabs = document.querySelector('.meeting-main .tabs');
+        const layout = document.querySelector('.meeting-layout');
+        if (!panel || !tabs || !layout) return;
+        const layoutTop = layout.getBoundingClientRect().top + window.scrollY;
+        const tabsTop = tabs.getBoundingClientRect().top + window.scrollY;
+        panel.style.marginTop = (tabsTop - layoutTop) + 'px';
+    }
+
+    // ---------------------------------------------------------------------------
+    // Comment edit / delete
+    // ---------------------------------------------------------------------------
+
+    function startEditComment(item) {
+        const bodyEl = item.querySelector('.comment-body');
+        if (!bodyEl || item.querySelector('.comment-edit-editor')) return;
+
+        const originalHtml = bodyEl.innerHTML;
+        item.dataset.originalContent = originalHtml;
+        bodyEl.style.display = 'none';
+
+        const editEditor = document.createElement('div');
+        editEditor.className = 'comment-edit-editor';
+        editEditor.contentEditable = 'true';
+        editEditor.innerHTML = originalHtml;
+
+        const editActions = document.createElement('div');
+        editActions.className = 'comment-edit-actions';
+        editActions.innerHTML =
+            '<button class="comment-edit-cancel">Cancel</button>' +
+            '<button class="comment-edit-save">Save</button>';
+
+        bodyEl.parentNode.insertBefore(editEditor, bodyEl.nextSibling);
+        bodyEl.parentNode.insertBefore(editActions, editEditor.nextSibling);
+
+        editEditor.focus();
+
+        const actionsEl = item.querySelector('.comment-actions');
+        if (actionsEl) actionsEl.style.display = 'none';
+    }
+
+    function cancelEditComment(item) {
+        const bodyEl = item.querySelector('.comment-body');
+        const editEditor = item.querySelector('.comment-edit-editor');
+        const editActions = item.querySelector('.comment-edit-actions');
+
+        if (editEditor) editEditor.remove();
+        if (editActions) editActions.remove();
+        if (bodyEl) bodyEl.style.display = '';
+
+        const actionsEl = item.querySelector('.comment-actions');
+        if (actionsEl) actionsEl.style.display = '';
+    }
+
+    async function saveEditComment(meetingId, item) {
+        const editEditor = item.querySelector('.comment-edit-editor');
+        if (!editEditor) return;
+
+        const content = editEditor.innerHTML.trim();
+        if (!content || content === '<br>') return;
+
+        const commentId = item.dataset.commentId;
+        const saveBtn = item.querySelector('.comment-edit-save');
+        if (saveBtn) saveBtn.disabled = true;
+
+        try {
+            await api(`/api/recordings/${meetingId}/comments/${commentId}`, {
+                method: 'PATCH',
+                body: JSON.stringify({ content: content }),
+            });
+            cancelEditComment(item);
+            lastKnownCommentId = null;
+            await fetchComments(meetingId);
+        } catch (err) {
+            showToast('Failed to update comment: ' + err.message, 'error');
+            if (saveBtn) saveBtn.disabled = false;
+        }
+    }
+
+    async function deleteComment(meetingId, commentId) {
+        try {
+            await api(`/api/recordings/${meetingId}/comments/${commentId}`, {
+                method: 'DELETE',
+            });
+            lastKnownCommentId = null;
+            await fetchComments(meetingId);
+        } catch (err) {
+            showToast('Failed to delete comment: ' + err.message, 'error');
         }
     }
 
