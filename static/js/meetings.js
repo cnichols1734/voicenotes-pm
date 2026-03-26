@@ -5,8 +5,17 @@
 
 window.MeetingsModule = (() => {
     let allMeetings = [];
-    let currentMeeting = null; // module-scoped for action item persistence
-    let openSwipeRow = null;   // track the currently-open swipe row
+    let currentMeeting = null;
+    let openSwipeRow = null;
+    let fetchGeneration = 0;
+    let searchDebounceTimer = null;
+    const SEARCH_DEBOUNCE_MS = 320;
+
+    // Presence & live-update polling state
+    let presenceInterval = null;
+    let lastKnownUpdatedAt = null;
+    const HEARTBEAT_INTERVAL_MS = 5000;
+    const MAX_PRESENCE_BUBBLES = 4;
 
     function getEl(id) { return document.getElementById(id); }
 
@@ -23,20 +32,34 @@ window.MeetingsModule = (() => {
         const params = new URLSearchParams();
         if (state.currentFolderFilter) params.set('folder_id', state.currentFolderFilter);
         if (state.currentTypeFilter) params.set('meeting_type_id', state.currentTypeFilter);
+        const q = (state.searchQuery || '').trim();
+        if (q) params.set('q', q);
 
+        const gen = ++fetchGeneration;
         try {
             const data = await api(`/api/recordings?${params.toString()}`);
+            if (gen !== fetchGeneration) return;
+
             allMeetings = data.meetings || [];
 
-            // Update all-meetings count
+            // Sidebar total should not shrink while searching (list is filtered server-side)
             const countEl = getEl('all-meetings-count');
-            if (countEl) countEl.textContent = allMeetings.length;
+            if (countEl && !q) countEl.textContent = allMeetings.length;
 
             renderMeetings(allMeetings);
         } catch (err) {
+            if (gen !== fetchGeneration) return;
             console.error('Failed to load meetings:', err);
             showToast('Failed to load meetings.', 'error');
         }
+    }
+
+    function scheduleReloadForSearch() {
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(() => {
+            searchDebounceTimer = null;
+            reload();
+        }, SEARCH_DEBOUNCE_MS);
     }
 
     // ---------------------------------------------------------------------------
@@ -56,28 +79,34 @@ window.MeetingsModule = (() => {
         // Remove existing cards
         list.querySelectorAll('.swipe-row').forEach(el => el.remove());
 
-        // Apply search
-        const query = window.AppState.searchQuery.toLowerCase();
-        let filtered = query
-            ? meetings.filter(m => m.title.toLowerCase().includes(query))
-            : meetings;
-
-        // Apply sort
+        // Search is server-side (title + transcript); this list is already filtered.
         const sort = window.AppState.sortOrder;
-        filtered = [...filtered].sort((a, b) => {
+        const sorted = [...meetings].sort((a, b) => {
             if (sort === 'oldest') return new Date(a.recorded_at) - new Date(b.recorded_at);
             if (sort === 'alpha') return a.title.localeCompare(b.title);
             return new Date(b.recorded_at) - new Date(a.recorded_at); // newest first (default)
         });
 
-        if (filtered.length === 0) {
-            if (empty) empty.style.display = 'flex';
+        if (sorted.length === 0) {
+            if (empty) {
+                const q = (window.AppState.searchQuery || '').trim();
+                const titleEl = empty.querySelector('.empty-state-title');
+                const descEl = empty.querySelector('.empty-state-desc');
+                if (q && titleEl && descEl) {
+                    titleEl.textContent = 'No matches';
+                    descEl.textContent = 'Try different words or clear the search box.';
+                } else if (titleEl && descEl) {
+                    titleEl.textContent = 'No meetings yet';
+                    descEl.textContent = 'Hit the record button to capture your first meeting.';
+                }
+                empty.style.display = 'flex';
+            }
             return;
         }
         if (empty) empty.style.display = 'none';
 
         const types = window.AppState.meetingTypes || [];
-        filtered.forEach(meeting => {
+        sorted.forEach(meeting => {
             const row = buildMeetingCard(meeting, types);
             list.appendChild(row);
         });
@@ -90,9 +119,29 @@ window.MeetingsModule = (() => {
         const folders = window.AppState.folders || [];
         const folder = folders.find(f => f.id === meeting.folder_id);
         const summary = meeting.summary || {};
-        const preview = summary.executive_summary
-            ? (summary.executive_summary.length > 120 ? summary.executive_summary.slice(0, 120) + '...' : summary.executive_summary)
-            : '';
+        const q = (window.AppState.searchQuery || '').trim();
+
+        // Title: highlight matches when searching
+        const titleHtml = q ? highlightText(meeting.title, q) : escapeHtml(meeting.title);
+
+        // Preview: prefer transcript snippet (transcript-only match) over exec summary
+        let previewHtml = '';
+        if (meeting.search_snippet) {
+            // Transcript hit — show excerpt with ellipsis and a subtle label
+            previewHtml = `
+              <div class="meeting-card-preview meeting-card-preview--snippet">
+                <span class="snippet-label">transcript</span>…${highlightText(meeting.search_snippet, q)}…
+              </div>`;
+        } else {
+            const exec = summary.executive_summary
+                ? (summary.executive_summary.length > 120
+                    ? summary.executive_summary.slice(0, 120) + '…'
+                    : summary.executive_summary)
+                : '';
+            if (exec) {
+                previewHtml = `<div class="meeting-card-preview">${q ? highlightText(exec, q) : escapeHtml(exec)}</div>`;
+            }
+        }
 
         // ── Swipe wrapper ────────────────────────────────────────────────────
         const wrapper = document.createElement('div');
@@ -123,14 +172,14 @@ window.MeetingsModule = (() => {
         card.innerHTML = `
           <div class="meeting-card-body">
             <div class="meeting-card-header">
-              <div class="meeting-card-title">${escapeHtml(meeting.title)}</div>
+              <div class="meeting-card-title">${titleHtml}</div>
             </div>
             <div class="meeting-card-meta">
               ${typeBadge}${folderBadge}
               <span class="badge-date">${formatDate(meeting.recorded_at)}</span>
               ${meeting.duration_seconds ? `<span class="badge-date">${formatDuration(meeting.duration_seconds)}</span>` : ''}
             </div>
-            ${preview ? `<div class="meeting-card-preview">${escapeHtml(preview)}</div>` : ''}
+            ${previewHtml}
           </div>
           <div class="meeting-card-actions">
             <button class="card-action-btn card-move-btn" title="Move to folder">
@@ -436,7 +485,7 @@ window.MeetingsModule = (() => {
         if (searchInput) {
             searchInput.addEventListener('input', () => {
                 window.AppState.searchQuery = searchInput.value;
-                renderMeetings(allMeetings);
+                scheduleReloadForSearch();
             });
         }
 
@@ -465,6 +514,7 @@ window.MeetingsModule = (() => {
 
             const meeting = meetingData.meeting;
             currentMeeting = meeting;
+            lastKnownUpdatedAt = meeting.updated_at;
             const types = typesData.meeting_types || [];
             const folders = foldersData.folders || [];
 
@@ -477,10 +527,11 @@ window.MeetingsModule = (() => {
             populateDetailFolderSelect(folders, meeting.folder_id);
             populateResurfaceGrid(types);
 
-            // Init chat if meeting is complete
             if (meeting.status === 'complete' && window.ChatModule) {
                 window.ChatModule.init(meetingId);
             }
+
+            startPresencePolling(meetingId);
         } catch (err) {
             showToast(`Failed to load meeting: ${err.message}`, 'error');
         }
@@ -535,74 +586,7 @@ window.MeetingsModule = (() => {
         // Action items
         const actionsEl = getEl('action-items-list');
         if (actionsEl && summary.action_items) {
-            if (summary.action_items.length === 0) {
-                actionsEl.innerHTML = '<p class="text-secondary">No action items recorded.</p>';
-            } else {
-                actionsEl.innerHTML = summary.action_items.map((item, idx) => {
-                    const checked = item.completed ? ' checked' : '';
-                    const completedClass = item.completed ? ' completed' : '';
-                    const priorityLabel = item.priority ? item.priority.charAt(0).toUpperCase() + item.priority.slice(1) : '';
-                    const priorityClass = item.priority ? ` priority-${item.priority}` : '';
-                    return `
-          <div class="action-item${completedClass}" data-index="${idx}">
-            <div class="action-checkbox${checked}" data-index="${idx}"></div>
-            <div class="action-item-body">
-              <div class="action-task">${escapeHtml(item.task)}</div>
-              <div class="action-pills">
-                ${item.owner ? `<span class="action-pill owner"><i data-lucide="user"></i> ${escapeHtml(item.owner)}</span>` : ''}
-                ${item.deadline ? `<span class="action-pill deadline" data-index="${idx}"><i data-lucide="calendar"></i> <span class="deadline-text">${escapeHtml(item.deadline)}</span></span>` : ''}
-                ${item.priority ? `<span class="action-pill priority-pill${priorityClass}">${priorityLabel}</span>` : ''}
-              </div>
-            </div>
-          </div>`;
-                }).join('');
-
-                // Bind checkbox clicks
-                actionsEl.querySelectorAll('.action-checkbox').forEach(cb => {
-                    cb.addEventListener('click', () => {
-                        const idx = parseInt(cb.dataset.index);
-                        const item = summary.action_items[idx];
-                        item.completed = !item.completed;
-                        cb.classList.toggle('checked');
-                        cb.closest('.action-item').classList.toggle('completed');
-                        updateActionItemsCount(summary.action_items);
-                        saveActionItems();
-                    });
-                });
-
-                // Bind deadline pill clicks for inline date editing
-                actionsEl.querySelectorAll('.action-pill.deadline').forEach(pill => {
-                    pill.addEventListener('click', (e) => {
-                        if (e.target.closest('.deadline-date-input')) return;
-                        const idx = parseInt(pill.dataset.index);
-                        const item = summary.action_items[idx];
-                        const existing = pill.querySelector('.deadline-date-input');
-                        if (existing) { existing.remove(); return; }
-
-                        const dateInput = document.createElement('input');
-                        dateInput.type = 'date';
-                        dateInput.className = 'deadline-date-input';
-                        dateInput.value = item.deadline && item.deadline !== 'TBD' && /^\d{4}-\d{2}-\d{2}$/.test(item.deadline) ? item.deadline : '';
-                        pill.appendChild(dateInput);
-                        dateInput.focus();
-
-                        dateInput.addEventListener('change', () => {
-                            if (dateInput.value) {
-                                item.deadline = dateInput.value;
-                                pill.querySelector('.deadline-text').textContent = dateInput.value;
-                            }
-                            dateInput.remove();
-                            saveActionItems();
-                        });
-
-                        dateInput.addEventListener('blur', () => {
-                            setTimeout(() => dateInput.remove(), 150);
-                        });
-                    });
-                });
-
-                updateActionItemsCount(summary.action_items);
-            }
+            renderActionItems(actionsEl, summary);
         }
 
         // Decisions
@@ -638,6 +622,516 @@ window.MeetingsModule = (() => {
         if (window.lucide) lucide.createIcons();
     }
 
+    // ---------------------------------------------------------------------------
+    // Action items: rendering, inline editing, add, history
+    // ---------------------------------------------------------------------------
+    function formatDeadlineDisplay(raw) {
+        if (!raw || raw === 'TBD') return 'Set date';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+            const [y, m, d] = raw.split('-').map(Number);
+            const dt = new Date(y, m - 1, d);
+            return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        }
+        return raw;
+    }
+
+    const PRIORITY_OPTIONS = ['low', 'medium', 'high', 'urgent'];
+
+    function renderActionItems(actionsEl, summary) {
+        if (!summary.action_items || summary.action_items.length === 0) {
+            actionsEl.innerHTML = '<p class="text-secondary">No action items recorded.</p>';
+            actionsEl.appendChild(buildAddActionItemBtn());
+            updateActionItemsCount(summary.action_items || []);
+            return;
+        }
+
+        actionsEl.innerHTML = summary.action_items.map((item, idx) => {
+            const checked = item.completed ? ' checked' : '';
+            const completedClass = item.completed ? ' completed' : '';
+            const prio = item.priority || 'medium';
+            const priorityLabel = prio.charAt(0).toUpperCase() + prio.slice(1);
+            const priorityClass = ` priority-${prio}`;
+            const itemId = item.id || idx;
+            return `
+          <div class="action-item${completedClass}" data-item-id="${escapeHtml(String(itemId))}" data-index="${idx}">
+            <div class="action-checkbox${checked}" data-index="${idx}"></div>
+            <div class="action-item-body">
+              <div class="action-task">${escapeHtml(item.task)}</div>
+              <div class="action-pills">
+                <span class="action-pill owner"><i data-lucide="user"></i> <span class="owner-text">${item.owner ? escapeHtml(item.owner) : 'Unassigned'}</span></span>
+                <span class="action-pill deadline"><i data-lucide="calendar"></i> <span class="deadline-text">${formatDeadlineDisplay(item.deadline)}</span></span>
+                <span class="action-pill priority-pill${priorityClass}"><span class="priority-text">${priorityLabel}</span></span>
+              </div>
+            </div>
+            <span class="action-item-hint">tap to edit &middot; hold to reorder</span>
+          </div>`;
+        }).join('');
+
+        actionsEl.querySelectorAll('.action-checkbox').forEach(cb => {
+            cb.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = parseInt(cb.dataset.index);
+                const item = summary.action_items[idx];
+                const newVal = !item.completed;
+                item.completed = newVal;
+                cb.classList.toggle('checked');
+                cb.closest('.action-item').classList.toggle('completed');
+                updateActionItemsCount(summary.action_items);
+                patchActionItem(item.id, { completed: newVal });
+            });
+        });
+
+        initActionItemInteractions(actionsEl, summary);
+
+        actionsEl.appendChild(buildAddActionItemBtn());
+        buildHistoryToggle(actionsEl);
+        updateActionItemsCount(summary.action_items);
+        if (window.lucide) lucide.createIcons();
+    }
+
+    // -----------------------------------------------------------------------
+    // Long-press to drag, tap to edit (pointer events: desktop + mobile)
+    // -----------------------------------------------------------------------
+    const LONG_PRESS_MS = 400;
+    let _dndCleanup = null;
+
+    function initActionItemInteractions(container, summary) {
+        if (_dndCleanup) { _dndCleanup(); _dndCleanup = null; }
+
+        let pressState = null;
+        let dragState = null;
+
+        function getActionItems() {
+            return Array.from(container.querySelectorAll('.action-item'));
+        }
+
+        function getPointerY(e) {
+            return e.clientY ?? 0;
+        }
+
+        function getPointerX(e) {
+            return e.clientX ?? 0;
+        }
+
+        function createGhost(sourceEl, x, y) {
+            const ghost = document.createElement('div');
+            ghost.className = 'action-item-ghost';
+            const task = sourceEl.querySelector('.action-task');
+            if (task) ghost.textContent = task.textContent;
+            const rect = sourceEl.getBoundingClientRect();
+            ghost.style.width = rect.width + 'px';
+            ghost.style.left = (x - rect.width / 2) + 'px';
+            ghost.style.top = (y - 20) + 'px';
+            document.body.appendChild(ghost);
+            return ghost;
+        }
+
+        function createDropIndicator() {
+            const ind = document.createElement('div');
+            ind.className = 'action-items-drop-indicator';
+            return ind;
+        }
+
+        function cancelPress() {
+            if (pressState) {
+                clearTimeout(pressState.timer);
+                if (pressState.item) pressState.item.classList.remove('drag-ready');
+                pressState = null;
+            }
+        }
+
+        function startDrag(item, x, y) {
+            const items = getActionItems();
+            const fromIndex = items.indexOf(item);
+            if (fromIndex === -1) return;
+
+            const rects = items.map(el => el.getBoundingClientRect());
+
+            dragState = {
+                sourceEl: item,
+                fromIndex,
+                toIndex: fromIndex,
+                ghost: createGhost(item, x, y),
+                indicator: createDropIndicator(),
+                rects,
+                items,
+                active: true,
+            };
+
+            item.classList.remove('drag-ready');
+            item.classList.add('dragging');
+            document.body.style.userSelect = 'none';
+            document.body.style.webkitUserSelect = 'none';
+        }
+
+        function onPointerDown(e) {
+            if (dragState) return;
+            const item = e.target.closest('.action-item');
+            if (!item || item.classList.contains('editing')) return;
+            if (e.target.closest('.action-checkbox')) return;
+
+            const x = getPointerX(e);
+            const y = getPointerY(e);
+
+            pressState = {
+                item,
+                startX: x,
+                startY: y,
+                moved: false,
+                timer: setTimeout(() => {
+                    if (!pressState || pressState.moved) return;
+                    item.classList.add('drag-ready');
+                    if (navigator.vibrate) navigator.vibrate(30);
+                    setTimeout(() => {
+                        if (!pressState) return;
+                        startDrag(item, pressState.startX, pressState.startY);
+                        pressState = null;
+                    }, 100);
+                }, LONG_PRESS_MS),
+            };
+        }
+
+        function onPointerMove(e) {
+            if (pressState && !pressState.moved) {
+                const dx = getPointerX(e) - pressState.startX;
+                const dy = getPointerY(e) - pressState.startY;
+                if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+                    pressState.moved = true;
+                    cancelPress();
+                }
+            }
+
+            if (!dragState || !dragState.active) return;
+            e.preventDefault();
+
+            const y = getPointerY(e);
+            const x = getPointerX(e);
+
+            dragState.ghost.style.left = (x - parseInt(dragState.ghost.style.width) / 2) + 'px';
+            dragState.ghost.style.top = (y - 20) + 'px';
+
+            let newIndex = dragState.fromIndex;
+            const items = dragState.items;
+            for (let i = 0; i < items.length; i++) {
+                const rect = dragState.rects[i];
+                const mid = rect.top + rect.height / 2;
+                if (y < mid) { newIndex = i; break; }
+                newIndex = i + 1;
+            }
+            newIndex = Math.max(0, Math.min(newIndex, items.length));
+
+            if (newIndex !== dragState.toIndex) {
+                dragState.toIndex = newIndex;
+                if (dragState.indicator.parentNode) dragState.indicator.remove();
+                if (newIndex >= items.length) {
+                    const lastItem = items[items.length - 1];
+                    lastItem.parentNode.insertBefore(dragState.indicator, lastItem.nextSibling);
+                } else {
+                    items[newIndex].parentNode.insertBefore(dragState.indicator, items[newIndex]);
+                }
+            }
+
+            items.forEach((el, i) => {
+                if (el === dragState.sourceEl) return;
+                el.classList.remove('drag-over-above', 'drag-over-below');
+                if (dragState.fromIndex < newIndex) {
+                    if (i > dragState.fromIndex && i < newIndex) el.classList.add('drag-over-above');
+                } else if (dragState.fromIndex > newIndex) {
+                    if (i >= newIndex && i < dragState.fromIndex) el.classList.add('drag-over-below');
+                }
+            });
+        }
+
+        async function onPointerUp(e) {
+            const wasDragging = dragState && dragState.active;
+            const wasPressed = pressState && !pressState.moved;
+
+            if (dragState && dragState.active) {
+                dragState.active = false;
+                const { sourceEl, fromIndex, toIndex, ghost, indicator, items } = dragState;
+
+                items.forEach(el => el.classList.remove('drag-over-above', 'drag-over-below'));
+                sourceEl.classList.remove('dragging');
+                ghost.remove();
+                if (indicator.parentNode) indicator.remove();
+                document.body.style.userSelect = '';
+                document.body.style.webkitUserSelect = '';
+
+                const finalTo = toIndex > fromIndex ? toIndex - 1 : toIndex;
+                if (finalTo !== fromIndex && summary.action_items.length > 1) {
+                    const [moved] = summary.action_items.splice(fromIndex, 1);
+                    summary.action_items.splice(finalTo, 0, moved);
+                    renderActionItems(container, summary);
+                    await saveActionItemOrder(summary);
+                }
+                dragState = null;
+            }
+
+            if (wasPressed && !wasDragging) {
+                const item = pressState.item;
+                cancelPress();
+                if (item && !item.classList.contains('editing')) {
+                    const idx = parseInt(item.dataset.index);
+                    if (!isNaN(idx)) openActionItemEditMode(container, summary, idx);
+                }
+            } else {
+                cancelPress();
+            }
+        }
+
+        function onPointerCancel() {
+            cancelPress();
+            if (dragState && dragState.active) {
+                dragState.active = false;
+                dragState.items.forEach(el => el.classList.remove('drag-over-above', 'drag-over-below'));
+                dragState.sourceEl.classList.remove('dragging', 'drag-ready');
+                dragState.ghost.remove();
+                if (dragState.indicator.parentNode) dragState.indicator.remove();
+                document.body.style.userSelect = '';
+                document.body.style.webkitUserSelect = '';
+                dragState = null;
+            }
+        }
+
+        const touchStartHandler = (e) => {
+            if (e.target.closest('.action-item') && !e.target.closest('.action-checkbox') && !e.target.closest('.action-edit-form')) {
+                // Don't prevent default immediately -- let the long-press timer decide
+            }
+        };
+
+        const touchMoveHandler = (e) => {
+            if (dragState && dragState.active) e.preventDefault();
+        };
+
+        container.addEventListener('pointerdown', onPointerDown);
+        document.addEventListener('pointermove', onPointerMove);
+        document.addEventListener('pointerup', onPointerUp);
+        document.addEventListener('pointercancel', onPointerCancel);
+        container.addEventListener('touchmove', touchMoveHandler, { passive: false });
+
+        _dndCleanup = () => {
+            container.removeEventListener('pointerdown', onPointerDown);
+            document.removeEventListener('pointermove', onPointerMove);
+            document.removeEventListener('pointerup', onPointerUp);
+            document.removeEventListener('pointercancel', onPointerCancel);
+            container.removeEventListener('touchmove', touchMoveHandler);
+        };
+    }
+
+    async function saveActionItemOrder(summary) {
+        if (!currentMeeting) return;
+        const orderedIds = summary.action_items.map(item => item.id).filter(Boolean);
+        if (orderedIds.length === 0) return;
+        try {
+            await api(`/api/recordings/${currentMeeting.id}/action-items/reorder`, {
+                method: 'PUT',
+                body: { ordered_ids: orderedIds },
+            });
+        } catch (err) {
+            console.error('Failed to save action item order:', err);
+            showToast('Failed to save order.', 'error');
+        }
+    }
+
+    function openActionItemEditMode(actionsEl, summary, idx) {
+        const item = summary.action_items[idx];
+        const row = actionsEl.querySelector(`.action-item[data-index="${idx}"]`);
+        if (!row || row.classList.contains('editing')) return;
+
+        row.classList.add('editing');
+        const editBtn = row.querySelector('.action-edit-btn');
+        if (editBtn) editBtn.style.display = 'none';
+
+        const body = row.querySelector('.action-item-body');
+        const origHtml = body.innerHTML;
+
+        const prio = item.priority || 'medium';
+        const deadlineVal = (item.deadline && item.deadline !== 'TBD' && /^\d{4}-\d{2}-\d{2}$/.test(item.deadline)) ? item.deadline : '';
+
+        body.innerHTML = `
+          <div class="action-edit-form">
+            <div class="action-edit-field">
+              <label class="action-edit-label">Task</label>
+              <textarea class="action-edit-textarea" rows="2">${escapeHtml(item.task)}</textarea>
+            </div>
+            <div class="action-edit-row">
+              <div class="action-edit-field action-edit-field-half">
+                <label class="action-edit-label">Owner</label>
+                <input type="text" class="action-edit-input" value="${escapeHtml(item.owner || '')}" placeholder="Assign owner" data-field="owner" />
+              </div>
+              <div class="action-edit-field action-edit-field-half">
+                <label class="action-edit-label">Deadline</label>
+                <input type="date" class="action-edit-input action-edit-date" value="${deadlineVal}" data-field="deadline" />
+              </div>
+            </div>
+            <div class="action-edit-field">
+              <label class="action-edit-label">Priority</label>
+              <div class="action-edit-priority-row">
+                ${PRIORITY_OPTIONS.map(opt => `<button type="button" class="action-edit-priority-opt priority-${opt}${opt === prio ? ' active' : ''}" data-value="${opt}">${opt.charAt(0).toUpperCase() + opt.slice(1)}</button>`).join('')}
+              </div>
+            </div>
+            <div class="action-edit-btns">
+              <button class="action-edit-cancel">Cancel</button>
+              <button class="action-edit-save"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg> Save</button>
+            </div>
+          </div>`;
+
+        const textarea = body.querySelector('.action-edit-textarea');
+        const autoGrow = () => { textarea.style.height = 'auto'; textarea.style.height = textarea.scrollHeight + 'px'; };
+        textarea.addEventListener('input', autoGrow);
+        setTimeout(autoGrow, 0);
+
+        let selectedPriority = prio;
+        body.querySelectorAll('.action-edit-priority-opt').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                body.querySelectorAll('.action-edit-priority-opt').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                selectedPriority = btn.dataset.value;
+            });
+        });
+
+        const closeEdit = () => {
+            row.classList.remove('editing');
+            body.innerHTML = origHtml;
+            if (editBtn) editBtn.style.display = '';
+            if (window.lucide) lucide.createIcons();
+        };
+
+        body.querySelector('.action-edit-cancel').addEventListener('click', (e) => {
+            e.stopPropagation();
+            closeEdit();
+        });
+
+        body.querySelector('.action-edit-save').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const newTask = textarea.value.trim();
+            const newOwner = body.querySelector('[data-field="owner"]').value.trim();
+            const newDeadline = body.querySelector('[data-field="deadline"]').value;
+
+            const updates = {};
+            if (newTask && newTask !== item.task) { updates.task = newTask; item.task = newTask; }
+            if (newOwner !== (item.owner || '')) { updates.owner = newOwner; item.owner = newOwner; }
+            if (newDeadline !== (item.deadline || '')) { updates.deadline = newDeadline || ''; item.deadline = newDeadline || ''; }
+            if (selectedPriority !== (item.priority || 'medium')) { updates.priority = selectedPriority; item.priority = selectedPriority; }
+
+            if (Object.keys(updates).length > 0) {
+                for (const [field, value] of Object.entries(updates)) {
+                    await patchActionItem(item.id, { [field]: value });
+                }
+                renderActionItems(actionsEl, summary);
+                showToast('Action item saved.', 'success');
+            } else {
+                closeEdit();
+            }
+        });
+
+        textarea.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') { e.stopPropagation(); closeEdit(); }
+        });
+    }
+
+    function buildAddActionItemBtn() {
+        const btn = document.createElement('button');
+        btn.className = 'add-action-item-btn';
+        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Add action item';
+        btn.addEventListener('click', async () => {
+            if (!currentMeeting) return;
+            try {
+                const data = await api(`/api/recordings/${currentMeeting.id}/action-items`, {
+                    method: 'POST',
+                    body: { task: 'New action item', owner: '', deadline: '', priority: 'medium' },
+                });
+                currentMeeting.summary = data.summary;
+                const actionsEl = getEl('action-items-list');
+                if (actionsEl) renderActionItems(actionsEl, currentMeeting.summary);
+                showToast('Action item added.', 'success');
+            } catch (err) {
+                showToast('Failed to add action item.', 'error');
+            }
+        });
+        return btn;
+    }
+
+    async function patchActionItem(itemId, updates) {
+        if (!currentMeeting || !itemId) return;
+        try {
+            await api(`/api/recordings/${currentMeeting.id}/action-items/${itemId}`, {
+                method: 'PATCH',
+                body: updates,
+            });
+        } catch (err) {
+            console.error('Failed to save action item:', err);
+            showToast('Failed to save changes.', 'error');
+        }
+    }
+
+    function buildHistoryToggle(container) {
+        const toggle = document.createElement('button');
+        toggle.className = 'action-history-toggle';
+        toggle.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> View changes';
+        let historyEl = null;
+        let loaded = false;
+
+        toggle.addEventListener('click', async () => {
+            if (historyEl && historyEl.style.display !== 'none') {
+                historyEl.style.display = 'none';
+                toggle.classList.remove('active');
+                return;
+            }
+            if (!historyEl) {
+                historyEl = document.createElement('div');
+                historyEl.className = 'action-history-list';
+                container.appendChild(historyEl);
+            }
+            historyEl.style.display = 'block';
+            toggle.classList.add('active');
+
+            if (!loaded) {
+                historyEl.innerHTML = '<div class="action-history-loading">Loading...</div>';
+                try {
+                    const data = await api(`/api/recordings/${currentMeeting.id}/action-items/history`);
+                    renderHistory(historyEl, data.history || []);
+                    loaded = true;
+                } catch (err) {
+                    historyEl.innerHTML = '<div class="action-history-empty">Failed to load history.</div>';
+                }
+            }
+        });
+        container.appendChild(toggle);
+    }
+
+    function renderHistory(el, entries) {
+        if (!entries.length) {
+            el.innerHTML = '<div class="action-history-empty">No changes yet.</div>';
+            return;
+        }
+        el.innerHTML = entries.map(e => {
+            const isUser = e.changed_by_type === 'user';
+            const dotClass = isUser ? 'history-dot-user' : 'history-dot-shared';
+            const name = e.changed_by_name || (isUser ? 'User' : 'Shared link user');
+            const time = new Date(e.created_at).toLocaleString('en-US', {
+                month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+            });
+            let desc = '';
+            if (e.field_changed === 'created') {
+                desc = `added "<span class="history-value">${escapeHtml(e.new_value || '')}</span>"`;
+            } else if (e.field_changed === 'completed') {
+                desc = e.new_value === 'True' ? 'marked as done' : 'marked as not done';
+            } else {
+                desc = `changed ${e.field_changed}`;
+                if (e.old_value) desc += ` from "<span class="history-value">${escapeHtml(e.old_value)}</span>"`;
+                desc += ` to "<span class="history-value">${escapeHtml(e.new_value || '')}</span>"`;
+            }
+            return `<div class="action-history-entry">
+                <span class="history-dot ${dotClass}"></span>
+                <span class="history-name">${escapeHtml(name)}</span>
+                <span class="history-desc">${desc}</span>
+                <span class="history-time">${time}</span>
+            </div>`;
+        }).join('');
+    }
+
     function updateActionItemsCount(actionItems) {
         const countEl = getEl('action-items-count');
         if (!countEl || !actionItems) return;
@@ -648,19 +1142,6 @@ window.MeetingsModule = (() => {
             countEl.style.display = 'inline-block';
         } else {
             countEl.style.display = 'none';
-        }
-    }
-
-    async function saveActionItems() {
-        if (!currentMeeting || !currentMeeting.summary) return;
-        try {
-            await api(`/api/recordings/${currentMeeting.id}`, {
-                method: 'PUT',
-                body: { summary: currentMeeting.summary },
-            });
-        } catch (err) {
-            console.error('Failed to save action items:', err);
-            showToast('Failed to save changes.', 'error');
         }
     }
 
@@ -862,14 +1343,14 @@ window.MeetingsModule = (() => {
             });
         }
 
-        // Copy summary
+        // Copy summary as Markdown
         const copySummaryBtn = getEl('copy-summary-btn');
         if (copySummaryBtn) {
             copySummaryBtn.addEventListener('click', async () => {
-                const content = document.getElementById('summary-content');
-                if (!content) return;
+                if (!currentMeeting || !currentMeeting.summary) return;
+                const md = buildSummaryMarkdown(currentMeeting);
                 try {
-                    await navigator.clipboard.writeText(content.innerText || '');
+                    await navigator.clipboard.writeText(md);
                     showToast('Summary copied to clipboard.', 'success');
                 } catch (e) {
                     showToast('Could not copy. Please select and copy manually.', 'error');
@@ -890,6 +1371,182 @@ window.MeetingsModule = (() => {
                 }
             });
         }
+
+        // Share button
+        initShareButton();
+    }
+
+    // ---------------------------------------------------------------------------
+    // Share link management
+    // ---------------------------------------------------------------------------
+    function initShareButton() {
+        const shareBtn = getEl('share-btn');
+        const popover = getEl('share-popover');
+        const wrapper = getEl('share-btn-wrapper');
+        const linkInput = getEl('share-link-input');
+        const copyLinkBtn = getEl('copy-share-link-btn');
+        const revokeBtn = getEl('revoke-share-btn');
+
+        if (!shareBtn || !popover) return;
+
+        let shareId = null;
+        let popoverOpen = false;
+
+        // Check existing share status on load
+        loadShareStatus();
+
+        async function loadShareStatus() {
+            try {
+                const data = await api(`/api/recordings/${window.MEETING_ID}/share`);
+                if (data.share_id && data.is_active) {
+                    shareId = data.share_id;
+                    shareBtn.classList.add('share-active');
+                }
+            } catch (_) { /* ignore */ }
+        }
+
+        function togglePopover() {
+            popoverOpen = !popoverOpen;
+            if (popoverOpen) {
+                openPopover();
+            } else {
+                popover.classList.remove('visible');
+            }
+        }
+
+        async function openPopover() {
+            if (!shareId) {
+                try {
+                    const data = await api(`/api/recordings/${window.MEETING_ID}/share`, { method: 'POST' });
+                    shareId = data.share_id;
+                    shareBtn.classList.add('share-active');
+                } catch (err) {
+                    showToast(`Failed to create share link: ${err.message}`, 'error');
+                    return;
+                }
+            }
+            linkInput.value = window.location.origin + '/share/' + shareId;
+            popover.classList.add('visible');
+            revokeBtn.style.display = '';
+        }
+
+        shareBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            togglePopover();
+        });
+
+        if (copyLinkBtn) {
+            copyLinkBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                try {
+                    await navigator.clipboard.writeText(linkInput.value);
+                    copyLinkBtn.textContent = 'Copied!';
+                    setTimeout(() => { copyLinkBtn.textContent = 'Copy'; }, 2000);
+                } catch (_) {
+                    linkInput.select();
+                    showToast('Press Ctrl+C to copy.', 'info');
+                }
+            });
+        }
+
+        if (revokeBtn) {
+            revokeBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                try {
+                    await api(`/api/recordings/${window.MEETING_ID}/share`, { method: 'DELETE' });
+                    shareId = null;
+                    shareBtn.classList.remove('share-active');
+                    popover.classList.remove('visible');
+                    popoverOpen = false;
+                    showToast('Share link revoked.', 'success');
+                } catch (err) {
+                    showToast(`Failed to revoke: ${err.message}`, 'error');
+                }
+            });
+        }
+
+        // Close popover on outside click
+        document.addEventListener('click', (e) => {
+            if (popoverOpen && wrapper && !wrapper.contains(e.target)) {
+                popover.classList.remove('visible');
+                popoverOpen = false;
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------------------
+    // Markdown copy
+    // ---------------------------------------------------------------------------
+    function buildSummaryMarkdown(meeting) {
+        const s = meeting.summary || {};
+        const lines = [];
+
+        lines.push(`# ${meeting.title}`);
+        lines.push('');
+
+        const meta = [];
+        if (meeting.recorded_at) meta.push(`**Date:** ${formatDate(meeting.recorded_at)}`);
+        if (meeting.duration_seconds) meta.push(`**Duration:** ${formatDuration(meeting.duration_seconds)}`);
+        const types = window.AppState.meetingTypes || [];
+        const type = types.find(t => t.id === meeting.meeting_type_id);
+        if (type) meta.push(`**Type:** ${type.name}`);
+        if (meta.length) {
+            lines.push(meta.join('  ·  '));
+            lines.push('');
+        }
+
+        lines.push('---');
+        lines.push('');
+
+        if (s.executive_summary) {
+            lines.push('## Executive Summary');
+            lines.push('');
+            lines.push(s.executive_summary.trim());
+            lines.push('');
+        }
+
+        if (s.action_items && s.action_items.length) {
+            lines.push('## Action Items');
+            lines.push('');
+            s.action_items.forEach(item => {
+                const check = item.completed ? 'x' : ' ';
+                let line = `- [${check}] ${item.task}`;
+                const tags = [];
+                if (item.owner) tags.push(`@${item.owner}`);
+                if (item.deadline) tags.push(`📅 ${item.deadline}`);
+                if (item.priority) tags.push(`🔺 ${item.priority}`);
+                if (tags.length) line += `  —  ${tags.join('  ·  ')}`;
+                lines.push(line);
+            });
+            lines.push('');
+        }
+
+        if (s.decisions_made && s.decisions_made.length) {
+            lines.push('## Decisions Made');
+            lines.push('');
+            s.decisions_made.forEach(d => {
+                lines.push(`- **${d.decision}**`);
+                if (d.context) lines.push(`  ${d.context}`);
+                if (d.decided_by) lines.push(`  *Decided by: ${d.decided_by}*`);
+            });
+            lines.push('');
+        }
+
+        if (s.key_discussion_points && s.key_discussion_points.length) {
+            lines.push('## Key Discussion Points');
+            lines.push('');
+            s.key_discussion_points.forEach(p => lines.push(`- ${p}`));
+            lines.push('');
+        }
+
+        if (s.follow_ups && s.follow_ups.length) {
+            lines.push('## Follow-ups');
+            lines.push('');
+            s.follow_ups.forEach(f => lines.push(`- ${f}`));
+            lines.push('');
+        }
+
+        return lines.join('\n');
     }
 
     // ---------------------------------------------------------------------------
@@ -905,6 +1562,143 @@ window.MeetingsModule = (() => {
     }
 
     window.escapeHtml = escapeHtml;
+
+    /**
+     * Escape HTML then wrap every case-insensitive occurrence of `query`
+     * in <mark class="search-highlight">…</mark>.
+     * Safe to inject as innerHTML.
+     */
+    function highlightText(rawText, rawQuery) {
+        const safe = escapeHtml(rawText || '');
+        if (!rawQuery) return safe;
+        // Escape the query for both HTML entities and regex special chars
+        const safeQuery = escapeHtml(rawQuery).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        try {
+            return safe.replace(
+                new RegExp(`(${safeQuery})`, 'gi'),
+                '<mark class="search-highlight">$1</mark>'
+            );
+        } catch (_) {
+            return safe;
+        }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Presence polling & live updates
+    // ---------------------------------------------------------------------------
+    function startPresencePolling(meetingId) {
+        if (presenceInterval) clearInterval(presenceInterval);
+
+        sendHeartbeat(meetingId);
+        presenceInterval = setInterval(() => sendHeartbeat(meetingId), HEARTBEAT_INTERVAL_MS);
+
+        window.addEventListener('beforeunload', () => {
+            clearInterval(presenceInterval);
+            const url = `/api/presence/${meetingId}/leave`;
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon(url, '{}');
+            } else {
+                fetch(url, { method: 'POST', keepalive: true });
+            }
+        });
+    }
+
+    async function sendHeartbeat(meetingId) {
+        try {
+            const data = await api(`/api/presence/${meetingId}/heartbeat`, { method: 'POST' });
+            renderPresenceBubbles(data.viewers || []);
+
+            if (lastKnownUpdatedAt && data.meeting_updated_at && data.meeting_updated_at !== lastKnownUpdatedAt) {
+                lastKnownUpdatedAt = data.meeting_updated_at;
+                await refreshMeetingData(meetingId);
+            }
+        } catch (_) {
+            // Heartbeat failures are non-critical
+        }
+    }
+
+    async function refreshMeetingData(meetingId) {
+        try {
+            const meetingData = await api(`/api/recordings/${meetingId}`);
+            const meeting = meetingData.meeting;
+            currentMeeting = meeting;
+            lastKnownUpdatedAt = meeting.updated_at;
+
+            renderSummary(meeting.summary);
+            renderTranscript(meeting.transcript);
+
+            const titleEl = getEl('meeting-title');
+            if (titleEl && !titleEl.matches(':focus') && titleEl.textContent !== meeting.title) {
+                titleEl.textContent = meeting.title;
+            }
+
+            showUpdateFlash();
+        } catch (_) {
+            // Non-critical
+        }
+    }
+
+    function showUpdateFlash() {
+        const container = getEl('presence-bubbles');
+        if (!container) return;
+        const existing = container.querySelector('.presence-update-dot');
+        if (existing) existing.remove();
+        const dot = document.createElement('div');
+        dot.className = 'presence-update-dot';
+        container.appendChild(dot);
+        dot.addEventListener('animationend', () => dot.remove());
+    }
+
+    function renderPresenceBubbles(viewers) {
+        const container = getEl('presence-bubbles');
+        if (!container) return;
+
+        const shown = viewers.slice(0, MAX_PRESENCE_BUBBLES);
+        const overflow = viewers.length - shown.length;
+
+        const currentIds = new Set(shown.map(v => v.viewer_id));
+        container.querySelectorAll('.presence-bubble').forEach(el => {
+            if (!currentIds.has(el.dataset.viewerId)) el.remove();
+        });
+        const overflowEl = container.querySelector('.presence-viewer-count');
+        if (overflowEl && overflow <= 0) overflowEl.remove();
+
+        shown.forEach(viewer => {
+            let bubble = container.querySelector(`.presence-bubble[data-viewer-id="${viewer.viewer_id}"]`);
+            if (!bubble) {
+                bubble = document.createElement('div');
+                bubble.className = 'presence-bubble';
+                bubble.dataset.viewerId = viewer.viewer_id;
+                const tooltip = document.createElement('span');
+                tooltip.className = 'presence-tooltip';
+                bubble.appendChild(tooltip);
+                const updateDot = container.querySelector('.presence-update-dot');
+                if (updateDot) {
+                    container.insertBefore(bubble, updateDot);
+                } else {
+                    container.appendChild(bubble);
+                }
+            }
+            bubble.style.backgroundColor = viewer.color;
+            bubble.childNodes[0].textContent = viewer.initials;
+            bubble.querySelector('.presence-tooltip').textContent = viewer.display_name;
+        });
+
+        if (overflow > 0) {
+            let countEl = container.querySelector('.presence-viewer-count');
+            if (!countEl) {
+                countEl = document.createElement('div');
+                countEl.className = 'presence-viewer-count';
+                const updateDot = container.querySelector('.presence-update-dot');
+                if (updateDot) {
+                    container.insertBefore(countEl, updateDot);
+                } else {
+                    container.appendChild(countEl);
+                }
+            }
+            countEl.textContent = `+${overflow}`;
+        }
+    }
 
     return { init, reload, initDetail };
 })();

@@ -105,6 +105,95 @@ CREATE INDEX idx_meetings_meeting_type_id ON meetings(meeting_type_id);
 CREATE INDEX idx_meetings_status ON meetings(status);
 CREATE INDEX idx_meetings_recorded_at ON meetings(recorded_at DESC);
 
+-- Substring search on title + transcript (dashboard); requires pg_trgm
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
+CREATE INDEX idx_meetings_title_trgm ON meetings USING GIN (title gin_trgm_ops);
+CREATE INDEX idx_meetings_transcript_trgm ON meetings USING GIN (transcript gin_trgm_ops);
+
+CREATE OR REPLACE FUNCTION escape_like_pattern(p_text text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+AS $$
+  SELECT replace(replace(replace(COALESCE(p_text, ''), E'\\', E'\\\\'), E'%', E'\%'), E'_', E'\_');
+$$;
+
+CREATE OR REPLACE FUNCTION list_user_meetings(
+  p_user_id uuid,
+  p_folder_id uuid DEFAULT NULL,
+  p_meeting_type_id uuid DEFAULT NULL,
+  p_search text DEFAULT NULL
+)
+RETURNS TABLE (
+  id uuid,
+  title text,
+  folder_id uuid,
+  meeting_type_id uuid,
+  summary jsonb,
+  duration_seconds integer,
+  status text,
+  error_message text,
+  recorded_at timestamptz,
+  created_at timestamptz,
+  updated_at timestamptz,
+  search_snippet text
+)
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public
+AS $$
+  SELECT
+    m.id,
+    m.title,
+    m.folder_id,
+    m.meeting_type_id,
+    m.summary,
+    m.duration_seconds,
+    m.status,
+    m.error_message,
+    m.recorded_at,
+    m.created_at,
+    m.updated_at,
+    -- NULL when no search or title matched (show executive_summary on client).
+    -- TEXT excerpt when transcript matched but title didn't.
+    CASE
+      WHEN p_search IS NOT NULL
+           AND length(trim(p_search)) > 0
+           AND m.transcript IS NOT NULL
+           AND NOT (m.title ILIKE ('%' || escape_like_pattern(trim(p_search)) || '%') ESCAPE '\')
+           AND       m.transcript ILIKE ('%' || escape_like_pattern(trim(p_search)) || '%') ESCAPE '\'
+      THEN trim(
+             substring(
+               m.transcript
+               FROM GREATEST(1, strpos(lower(m.transcript), lower(trim(p_search))) - 60)
+               FOR 200
+             )
+           )
+      ELSE NULL
+    END AS search_snippet
+  FROM meetings m
+  WHERE m.user_id = p_user_id
+    AND (p_folder_id IS NULL OR m.folder_id = p_folder_id)
+    AND (p_meeting_type_id IS NULL OR m.meeting_type_id = p_meeting_type_id)
+    AND (
+      p_search IS NULL
+      OR length(trim(p_search)) = 0
+      OR (
+        m.title ILIKE ('%' || escape_like_pattern(trim(p_search)) || '%') ESCAPE '\'
+        OR (
+          m.transcript IS NOT NULL
+          AND m.transcript ILIKE ('%' || escape_like_pattern(trim(p_search)) || '%') ESCAPE '\'
+        )
+      )
+    )
+  ORDER BY m.recorded_at DESC;
+$$;
+
+GRANT EXECUTE ON FUNCTION list_user_meetings(uuid, uuid, uuid, text) TO service_role;
+
 -- ============================================
 -- UPDATED_AT TRIGGER
 -- Auto-update updated_at on row changes
@@ -152,6 +241,59 @@ CREATE TABLE chat_messages (
 
 CREATE INDEX idx_chat_messages_meeting ON chat_messages(meeting_id, created_at);
 CREATE INDEX idx_chat_messages_user ON chat_messages(user_id);
+
+-- ============================================
+-- SHARED LINKS
+-- Public read-only share tokens for meetings
+-- ============================================
+CREATE TABLE shared_links (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX idx_shared_links_meeting ON shared_links(meeting_id);
+CREATE INDEX idx_shared_links_user ON shared_links(user_id);
+
+-- ============================================
+-- ACTION ITEM HISTORY
+-- Tracks changes to action items for audit trail
+-- ============================================
+CREATE TABLE action_item_history (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    action_item_id TEXT NOT NULL,
+    field_changed TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    changed_by_type TEXT NOT NULL CHECK (changed_by_type IN ('user', 'shared')),
+    changed_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    changed_by_name TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_action_item_history_meeting ON action_item_history(meeting_id, created_at DESC);
+CREATE INDEX idx_action_item_history_item ON action_item_history(action_item_id);
+
+-- ============================================
+-- MEETING PRESENCE
+-- Tracks who is currently viewing a meeting
+-- ============================================
+CREATE TABLE meeting_presence (
+    id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+    meeting_id UUID NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+    viewer_type TEXT NOT NULL CHECK (viewer_type IN ('user', 'shared')),
+    viewer_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    avatar_color TEXT NOT NULL,
+    last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (meeting_id, viewer_id)
+);
+
+CREATE INDEX idx_presence_meeting ON meeting_presence(meeting_id);
+CREATE INDEX idx_presence_last_seen ON meeting_presence(last_seen_at);
 
 -- ============================================
 -- NOTE: Default meeting types are seeded per-user

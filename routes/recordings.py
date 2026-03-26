@@ -2,6 +2,7 @@
 VoiceNotes PM - Recordings CRUD + upload/transcribe/summarize routes.
 """
 import logging
+import uuid
 from datetime import datetime
 
 from flask import Blueprint, jsonify, request
@@ -11,12 +12,18 @@ from services.supabase_client import get_supabase
 from services.whisper_service import transcribe_audio
 from services.summarizer_service import summarize_transcript
 from services.title_service import generate_title
+from services.action_items import (
+    ensure_action_item_ids, update_action_item, create_action_item,
+    reorder_action_items, get_history as get_action_item_history,
+)
 
 logger = logging.getLogger(__name__)
 
 recordings_bp = Blueprint("recordings", __name__, url_prefix="/api/recordings")
 
 MAX_AUDIO_BYTES = 100 * 1024 * 1024  # 100 MB hard limit
+# Dashboard search: bound length to keep queries predictable (DB still uses trigram indexes)
+MAX_MEETING_SEARCH_LEN = 200
 
 
 def _supabase_error(message, status=503):
@@ -29,26 +36,37 @@ def _supabase_error(message, status=503):
 @recordings_bp.route("/", methods=["GET"])
 @login_required
 def list_recordings():
-    """List all meetings for the current user, with optional filters."""
+    """
+    List meetings for the current user (dashboard).
+
+    Uses Postgres RPC list_user_meetings: omits transcript from the payload for
+    bandwidth, and applies optional q= search across title + transcript with
+    pg_trgm-backed ILIKE (see migration_meeting_search.sql).
+    """
     try:
         supabase = get_supabase()
-        query = (
-            supabase.table("meetings")
-            .select("*")
-            .eq("user_id", str(current_user.id))
-            .order("recorded_at", desc=True)
-        )
 
-        folder_id = request.args.get("folder_id")
-        meeting_type_id = request.args.get("meeting_type_id")
+        folder_id = request.args.get("folder_id") or None
+        meeting_type_id = request.args.get("meeting_type_id") or None
+        search_q = (request.args.get("q") or "").strip()
+        if len(search_q) > MAX_MEETING_SEARCH_LEN:
+            search_q = search_q[:MAX_MEETING_SEARCH_LEN]
 
-        if folder_id:
-            query = query.eq("folder_id", folder_id)
-        if meeting_type_id:
-            query = query.eq("meeting_type_id", meeting_type_id)
+        for name, raw in (("folder_id", folder_id), ("meeting_type_id", meeting_type_id)):
+            if raw:
+                try:
+                    uuid.UUID(str(raw))
+                except ValueError:
+                    return jsonify({"error": f"Invalid {name}"}), 400
 
-        result = query.execute()
-        return jsonify({"meetings": result.data})
+        rpc_params = {
+            "p_user_id": str(current_user.id),
+            "p_folder_id": folder_id,
+            "p_meeting_type_id": meeting_type_id,
+            "p_search": search_q if search_q else None,
+        }
+        result = supabase.rpc("list_user_meetings", rpc_params).execute()
+        return jsonify({"meetings": result.data or []})
     except Exception as exc:
         logger.error("Failed to list recordings: %s", exc)
         return _supabase_error(f"Failed to fetch meetings: {exc}")
@@ -73,7 +91,13 @@ def get_recording(meeting_id):
         )
         if not result.data:
             return jsonify({"error": "Meeting not found"}), 404
-        return jsonify({"meeting": result.data})
+        meeting = result.data
+        # Backfill stable IDs on action items for existing meetings
+        summary = meeting.get("summary")
+        if summary and ensure_action_item_ids(summary):
+            supabase.table("meetings").update({"summary": summary}).eq("id", meeting_id).execute()
+            meeting["summary"] = summary
+        return jsonify({"meeting": meeting})
     except Exception as exc:
         logger.error("Failed to get recording %s: %s", meeting_id, exc)
         return _supabase_error(f"Failed to fetch meeting: {exc}")
@@ -343,6 +367,140 @@ def update_recording(meeting_id):
     except Exception as exc:
         logger.error("Failed to update meeting %s: %s", meeting_id, exc)
         return _supabase_error(f"Failed to update meeting: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/recordings/<meeting_id>/action-items/<item_id>
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/action-items/<item_id>", methods=["PATCH"])
+@login_required
+def patch_action_item(meeting_id, item_id):
+    """Update a single action item (task, owner, deadline, completed)."""
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("meetings")
+            .select("*")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .single()
+            .execute()
+        )
+        if not result.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        meeting = result.data
+        data = request.get_json(force=True) or {}
+        summary = update_action_item(
+            meeting, item_id, data,
+            changed_by_type="user",
+            changed_by_user_id=str(current_user.id),
+            changed_by_name=current_user.display_name,
+        )
+        return jsonify({"summary": summary})
+    except KeyError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logger.error("Failed to update action item: %s", exc)
+        return _supabase_error(f"Failed to update action item: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# POST /api/recordings/<meeting_id>/action-items
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/action-items", methods=["POST"])
+@login_required
+def post_action_item(meeting_id):
+    """Create a new action item on a meeting."""
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("meetings")
+            .select("*")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .single()
+            .execute()
+        )
+        if not result.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        meeting = result.data
+        data = request.get_json(force=True) or {}
+        new_item, summary = create_action_item(
+            meeting, data,
+            changed_by_type="user",
+            changed_by_user_id=str(current_user.id),
+            changed_by_name=current_user.display_name,
+        )
+        return jsonify({"item": new_item, "summary": summary}), 201
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logger.error("Failed to create action item: %s", exc)
+        return _supabase_error(f"Failed to create action item: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# GET /api/recordings/<meeting_id>/action-items/history
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/action-items/history", methods=["GET"])
+@login_required
+def get_action_items_history(meeting_id):
+    """Fetch action item change history for a meeting the user owns."""
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("meetings")
+            .select("id")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .execute()
+        )
+        if not result.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        history = get_action_item_history(meeting_id)
+        return jsonify({"history": history})
+    except Exception as exc:
+        logger.error("Failed to fetch action item history: %s", exc)
+        return _supabase_error(f"Failed to fetch history: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# PUT /api/recordings/<meeting_id>/action-items/reorder
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/action-items/reorder", methods=["PUT"])
+@login_required
+def reorder_action_items_route(meeting_id):
+    """Reorder action items for a meeting the user owns."""
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("meetings")
+            .select("*")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .single()
+            .execute()
+        )
+        if not result.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        data = request.get_json(force=True) or {}
+        ordered_ids = data.get("ordered_ids")
+        if not ordered_ids or not isinstance(ordered_ids, list):
+            return jsonify({"error": "ordered_ids array required"}), 400
+
+        summary = reorder_action_items(result.data, ordered_ids)
+        return jsonify({"summary": summary})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    except Exception as exc:
+        logger.error("Failed to reorder action items: %s", exc)
+        return _supabase_error(f"Failed to reorder: {exc}")
 
 
 # ---------------------------------------------------------------------------

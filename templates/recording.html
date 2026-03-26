@@ -14,8 +14,11 @@
             <span id="breadcrumb-title">Meeting</span>
         </div>
 
-        <!-- Editable title -->
-        <h1 class="detail-title" id="meeting-title" contenteditable="true" spellcheck="false">Loading...</h1>
+        <!-- Title row with presence bubbles -->
+        <div class="detail-title-row">
+            <h1 class="detail-title" id="meeting-title" contenteditable="true" spellcheck="false">Loading...</h1>
+            <div class="presence-bubbles" id="presence-bubbles"></div>
+        </div>
 
         <div class="detail-meta" id="meeting-meta">
             <!-- Populated by JS: type badge, folder badge, date, duration -->
@@ -40,6 +43,21 @@
                     <i data-lucide="copy" style="width:14px;height:14px;"></i>
                     Copy Summary
                 </button>
+                <div class="share-btn-wrapper" id="share-btn-wrapper">
+                    <button class="btn btn-secondary" id="share-btn" title="Share meeting">
+                        <i data-lucide="share-2" style="width:14px;height:14px;"></i>
+                        Share
+                    </button>
+                    <div class="share-popover" id="share-popover">
+                        <div class="share-popover-header">Share this meeting</div>
+                        <div class="share-popover-desc">Anyone with the link can view the summary, transcript, and chat with AI.</div>
+                        <div class="share-link-row">
+                            <input type="text" class="share-link-input" id="share-link-input" readonly />
+                            <button class="btn btn-primary btn-sm" id="copy-share-link-btn">Copy</button>
+                        </div>
+                        <button class="share-revoke-btn" id="revoke-share-btn">Revoke link</button>
+                    </div>
+                </div>
                 <button class="btn btn-danger btn-sm" id="delete-meeting-btn" title="Delete meeting">
                     <i data-lucide="trash-2" style="width:13px;height:13px;"></i>
                     Delete
