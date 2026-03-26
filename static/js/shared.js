@@ -131,12 +131,14 @@
 
     function alignCommentsPanel() {
         var panel = getEl('comments-panel');
-        var tabs = document.querySelector('.meeting-main .tabs');
+        var anchor = document.querySelector('.meeting-main .summary-section') ||
+                     document.querySelector('.meeting-main .tab-panel.active');
         var layout = document.querySelector('.meeting-layout');
-        if (!panel || !tabs || !layout) return;
+        if (!panel || !anchor || !layout) return;
+        if (window.innerWidth <= 960) { panel.style.marginTop = ''; return; }
         var layoutTop = layout.getBoundingClientRect().top + window.scrollY;
-        var tabsTop = tabs.getBoundingClientRect().top + window.scrollY;
-        panel.style.marginTop = (tabsTop - layoutTop) + 'px';
+        var anchorTop = anchor.getBoundingClientRect().top + window.scrollY;
+        panel.style.marginTop = (anchorTop - layoutTop) + 'px';
     }
 
     // ---------------------------------------------------------------------------

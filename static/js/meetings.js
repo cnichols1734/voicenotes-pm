@@ -1969,12 +1969,14 @@ window.MeetingsModule = (() => {
 
     function alignCommentsPanel() {
         const panel = getEl('comments-panel');
-        const tabs = document.querySelector('.meeting-main .tabs');
+        const anchor = document.querySelector('.meeting-main .summary-section') ||
+                       document.querySelector('.meeting-main .tab-panel.active');
         const layout = document.querySelector('.meeting-layout');
-        if (!panel || !tabs || !layout) return;
+        if (!panel || !anchor || !layout) return;
+        if (window.innerWidth <= 960) { panel.style.marginTop = ''; return; }
         const layoutTop = layout.getBoundingClientRect().top + window.scrollY;
-        const tabsTop = tabs.getBoundingClientRect().top + window.scrollY;
-        panel.style.marginTop = (tabsTop - layoutTop) + 'px';
+        const anchorTop = anchor.getBoundingClientRect().top + window.scrollY;
+        panel.style.marginTop = (anchorTop - layoutTop) + 'px';
     }
 
     // ---------------------------------------------------------------------------
