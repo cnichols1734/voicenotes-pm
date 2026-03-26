@@ -1396,6 +1396,7 @@ mark.search-highlight {
   flex-direction: column;
   gap: 14px;
   width: 100%;
+  overflow: hidden;
 }
 
 .action-edit-field {
@@ -1424,6 +1425,7 @@ mark.search-highlight {
 
 .action-edit-textarea {
   width: 100%;
+  box-sizing: border-box;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   border-radius: 8px;
@@ -1446,6 +1448,7 @@ mark.search-highlight {
 
 .action-edit-input {
   width: 100%;
+  box-sizing: border-box;
   background: var(--bg-elevated);
   border: 1px solid var(--border-default);
   border-radius: 8px;
@@ -1574,6 +1577,10 @@ mark.search-highlight {
 
 @media (max-width: 480px) {
   .action-item.editing .action-item-body { padding: 14px 14px; }
+  .action-edit-row {
+    flex-direction: column;
+    gap: 14px;
+  }
   .action-edit-btns {
     justify-content: stretch;
   }
