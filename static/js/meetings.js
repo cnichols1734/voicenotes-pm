@@ -961,7 +961,10 @@ window.MeetingsModule = (() => {
               </div>
               <div class="action-edit-field action-edit-field-half">
                 <label class="action-edit-label">Deadline</label>
-                <input type="date" class="action-edit-input action-edit-date" value="${deadlineVal}" data-field="deadline" />
+                <div class="action-edit-date-wrap action-edit-input">
+                  <span class="action-edit-date-display">${deadlineVal ? formatDeadlineDisplay(deadlineVal) : 'Set date'}</span>
+                  <input type="date" class="action-edit-date-native" value="${deadlineVal}" data-field="deadline" />
+                </div>
               </div>
             </div>
             <div class="action-edit-field">
@@ -980,6 +983,14 @@ window.MeetingsModule = (() => {
         const autoGrow = () => { textarea.style.height = 'auto'; textarea.style.height = textarea.scrollHeight + 'px'; };
         textarea.addEventListener('input', autoGrow);
         setTimeout(autoGrow, 0);
+
+        const dateNative = body.querySelector('.action-edit-date-native');
+        const dateDisplay = body.querySelector('.action-edit-date-display');
+        if (dateNative && dateDisplay) {
+            dateNative.addEventListener('change', () => {
+                dateDisplay.textContent = dateNative.value ? formatDeadlineDisplay(dateNative.value) : 'Set date';
+            });
+        }
 
         let selectedPriority = prio;
         body.querySelectorAll('.action-edit-priority-opt').forEach(btn => {
