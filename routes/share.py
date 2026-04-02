@@ -13,6 +13,7 @@ from flask_login import login_required, current_user
 
 from services.supabase_client import get_supabase
 from services.chat_service import stream_chat_response
+from services.storage_service import get_signed_url
 from services.action_items import (
     ensure_action_item_ids, update_action_item, create_action_item,
     reorder_action_items, get_history as get_action_item_history,
@@ -176,12 +177,22 @@ def get_shared_meeting(share_id):
         sb.table("meetings").update({"summary": summary}).eq("id", meeting["id"]).execute()
         meeting["summary"] = summary
 
+    # Generate signed audio URL for playback
+    audio_url = None
+    if meeting.get("audio_path"):
+        try:
+            audio_url = get_signed_url(meeting["audio_path"])
+        except Exception as exc:
+            logger.warning("Failed to generate shared audio URL: %s", exc)
+
     return jsonify({
         "meeting": {
             "id": meeting["id"],
             "title": meeting["title"],
             "summary": meeting.get("summary"),
             "transcript": meeting.get("transcript"),
+            "transcript_segments": meeting.get("transcript_segments"),
+            "audio_url": audio_url,
             "duration_seconds": meeting.get("duration_seconds"),
             "recorded_at": meeting.get("recorded_at"),
             "updated_at": meeting.get("updated_at"),

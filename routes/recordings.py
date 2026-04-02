@@ -1,6 +1,7 @@
 """
 VoiceNotes PM - Recordings CRUD + upload/transcribe/summarize routes.
 """
+import json
 import logging
 import uuid
 from datetime import datetime
@@ -10,8 +11,9 @@ from flask import Blueprint, jsonify, request
 from flask_login import login_required, current_user
 
 from services.supabase_client import get_supabase
-from services.whisper_service import transcribe_audio
+from services.whisper_service import transcribe_audio, segments_to_text
 from services.summarizer_service import summarize_transcript
+from services.storage_service import upload_audio, get_signed_url, delete_audio
 from services.title_service import generate_title
 from services.action_items import (
     ensure_action_item_ids, update_action_item, create_action_item,
@@ -100,6 +102,13 @@ def get_recording(meeting_id):
         if summary and ensure_action_item_ids(summary):
             supabase.table("meetings").update({"summary": summary}).eq("id", meeting_id).execute()
             meeting["summary"] = summary
+        # Generate signed audio URL for playback
+        if meeting.get("audio_path"):
+            try:
+                meeting["audio_url"] = get_signed_url(meeting["audio_path"])
+            except Exception as exc:
+                logger.warning("Failed to generate audio URL: %s", exc)
+            meeting.pop("audio_path", None)
         return jsonify({"meeting": meeting})
     except Exception as exc:
         logger.error("Failed to get recording %s: %s", meeting_id, exc)
@@ -129,12 +138,13 @@ def transcribe_chunk():
     file_format = request.form.get("format", "webm")
 
     try:
-        transcript = transcribe_audio(audio_bytes, file_format=file_format)
+        segments = transcribe_audio(audio_bytes, file_format=file_format)
     except Exception as exc:
         logger.error("Chunk transcription failed: %s", exc)
         return jsonify({"error": "Transcription failed", "detail": str(exc)}), 502
 
-    return jsonify({"text": transcript})
+    text = segments_to_text(segments)
+    return jsonify({"text": text, "segments": segments})
 
 
 # ---------------------------------------------------------------------------
@@ -148,11 +158,27 @@ def upload_recording():
       1. Pre-built transcript (from streaming chunks) — just saves to DB
       2. Audio blob (legacy/fallback) — transcribes then saves
     """
-    # Check for pre-built transcript (streaming mode)
     transcript = request.form.get("transcript", "").strip()
+    segments_json = request.form.get("segments", "").strip()
+    duration_str = request.form.get("duration", "").strip()
+    file_format = request.form.get("format", "webm")
+
+    # Parse pre-built segments from streaming transcription
+    transcript_segments = None
+    if segments_json:
+        try:
+            transcript_segments = json.loads(segments_json)
+            if not isinstance(transcript_segments, list):
+                transcript_segments = None
+        except (json.JSONDecodeError, TypeError):
+            transcript_segments = None
 
     if not transcript:
-        # Legacy mode: audio blob upload
+        if transcript_segments:
+            transcript = segments_to_text(transcript_segments)
+
+    if not transcript:
+        # Legacy mode: audio blob upload with server-side transcription
         if "audio" not in request.files:
             return jsonify({"error": "No audio file or transcript provided"}), 400
 
@@ -165,10 +191,10 @@ def upload_recording():
         if len(audio_bytes) > MAX_AUDIO_BYTES:
             return jsonify({"error": "Audio file exceeds 100 MB limit."}), 413
 
-        file_format = request.form.get("format", "webm")
-
         try:
-            transcript = transcribe_audio(audio_bytes, file_format=file_format)
+            segments = transcribe_audio(audio_bytes, file_format=file_format)
+            transcript_segments = segments
+            transcript = segments_to_text(segments)
         except Exception as exc:
             logger.error("Whisper transcription failed: %s", exc)
             return jsonify({"error": "Transcription failed", "detail": str(exc)}), 502
@@ -176,7 +202,6 @@ def upload_recording():
     if not transcript:
         return jsonify({"error": "No transcript could be generated."}), 400
 
-    # Use a generic placeholder title (user can name it or use AI generate)
     title_text = f"Meeting - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
 
     # Save meeting record
@@ -188,11 +213,37 @@ def upload_recording():
             "status": "selecting_type",
             "user_id": str(current_user.id),
         }
+        if transcript_segments:
+            insert_data["transcript_segments"] = transcript_segments
+        if duration_str:
+            try:
+                insert_data["duration_seconds"] = int(float(duration_str))
+            except (ValueError, TypeError):
+                pass
+
         result = supabase.table("meetings").insert(insert_data).execute()
         meeting = result.data[0]
     except Exception as exc:
         logger.error("Failed to save meeting after transcription: %s", exc)
         return _supabase_error(f"Failed to save meeting: {exc}")
+
+    # Upload audio to storage (non-blocking: meeting is saved even if storage fails)
+    audio_file = request.files.get("audio")
+    if audio_file:
+        audio_file.seek(0)
+        audio_bytes = audio_file.read()
+        if len(audio_bytes) >= 1000:
+            mime_type = audio_file.content_type or f"audio/{file_format}"
+            try:
+                audio_path = upload_audio(
+                    str(current_user.id), meeting["id"], audio_bytes, mime_type,
+                )
+                supabase.table("meetings").update({
+                    "audio_path": audio_path,
+                    "audio_mime_type": mime_type,
+                }).eq("id", meeting["id"]).execute()
+            except Exception as exc:
+                logger.error("Audio storage failed for meeting %s: %s", meeting["id"], exc)
 
     return jsonify({
         "meeting_id": meeting["id"],
@@ -515,6 +566,15 @@ def delete_recording(meeting_id):
     """Delete a meeting record (must belong to current user)."""
     try:
         supabase = get_supabase()
+        # Clean up stored audio before deleting the row
+        try:
+            row = supabase.table("meetings").select("audio_path").eq(
+                "id", meeting_id
+            ).eq("user_id", str(current_user.id)).execute()
+            if row.data and row.data[0].get("audio_path"):
+                delete_audio(row.data[0]["audio_path"])
+        except Exception as exc:
+            logger.warning("Audio cleanup failed for meeting %s: %s", meeting_id, exc)
         supabase.table("meetings").delete().eq("id", meeting_id).eq("user_id", str(current_user.id)).execute()
         return jsonify({"message": "Meeting deleted"}), 200
     except Exception as exc:
