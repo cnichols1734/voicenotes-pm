@@ -1944,7 +1944,7 @@ mark.search-highlight {
   height: 34px;
   border-radius: 50%;
   border: none;
-  background: var(--primary);
+  background: var(--accent-primary);
   color: white;
   cursor: pointer;
   flex-shrink: 0;
@@ -1952,7 +1952,7 @@ mark.search-highlight {
 }
 
 .player-play-pause:hover {
-  background: var(--primary-hover);
+  background: var(--accent-primary-hover);
   transform: scale(1.05);
 }
 
@@ -1982,7 +1982,7 @@ mark.search-highlight {
 
 .player-progress-fill {
   height: 100%;
-  background: var(--primary);
+  background: var(--accent-primary);
   border-radius: 3px;
   width: 0;
   position: relative;
@@ -1996,7 +1996,7 @@ mark.search-highlight {
   transform: translateY(-50%);
   width: 12px;
   height: 12px;
-  background: var(--primary);
+  background: var(--accent-primary);
   border-radius: 50%;
   box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
   transition: width 0.1s ease, height 0.1s ease;
@@ -2006,11 +2006,11 @@ mark.search-highlight {
   width: 14px;
   height: 14px;
   right: -7px;
-  background: var(--primary-hover);
+  background: var(--accent-primary-hover);
 }
 
 .player-progress-bar:hover .player-progress-fill {
-  background: var(--primary-hover);
+  background: var(--accent-primary-hover);
 }
 
 .player-progress-bar:hover {
