@@ -158,24 +158,6 @@ window.TranscriptPlayer = (() => {
         audio = new Audio(audioUrl);
         audio.preload = 'auto';
 
-        // #region agent log — visible debug banner (temporary)
-        var _dbg = document.createElement('div');
-        _dbg.id = 'tp-debug-banner';
-        _dbg.style.cssText = 'background:#1a1a2e;color:#0f0;font:11px/1.4 monospace;padding:8px 12px;border-radius:6px;margin-bottom:8px;white-space:pre-wrap;max-height:120px;overflow-y:auto;border:1px solid #333;';
-        _dbg.textContent = 'DEBUG: loading audio...';
-        container.insertBefore(_dbg, container.firstChild);
-        audio.addEventListener('loadedmetadata', function() {
-            _dbg.textContent = 'AUDIO LOADED\n'
-                + 'duration: ' + audio.duration.toFixed(2) + 's (' + formatTime(audio.duration) + ')\n'
-                + 'seekable ranges: ' + audio.seekable.length + (audio.seekable.length > 0 ? ' [0 - ' + audio.seekable.end(audio.seekable.length-1).toFixed(2) + 's]' : '') + '\n'
-                + 'src: ...' + audio.src.slice(-80) + '\n'
-                + 'segments: ' + segments.length + ', last ends at: ' + (segments.length > 0 ? segments[segments.length-1].end.toFixed(2) + 's' : 'n/a');
-        });
-        audio.addEventListener('error', function() {
-            _dbg.textContent = 'AUDIO ERROR: code=' + (audio.error ? audio.error.code : '?') + ' msg=' + (audio.error ? audio.error.message : 'unknown');
-        });
-        // #endregion
-
         // Bind all event handlers (stored for clean removal)
         boundOnTimeUpdate = onTimeUpdate;
         boundOnEnded = onEnded;
@@ -200,21 +182,7 @@ window.TranscriptPlayer = (() => {
         userScrolledAway = false;
         hideBackToPlayback();
 
-        // #region agent log — update debug banner on click
-        var _dbg2 = document.getElementById('tp-debug-banner');
-        if (_dbg2) {
-            _dbg2.textContent += '\n---CLICK seg[' + idx + '] start=' + seg.start.toFixed(2)
-                + ' → currentTime=' + audio.currentTime.toFixed(2)
-                + ' duration=' + (audio.duration||0).toFixed(2)
-                + ' seekable=' + (audio.seekable.length > 0 ? audio.seekable.end(audio.seekable.length-1).toFixed(2) : '0')
-                + ' buffered=' + (audio.buffered.length > 0 ? audio.buffered.end(audio.buffered.length-1).toFixed(2) : '0');
-        }
-        // #endregion
-
         audio.play().catch((err) => {
-            // #region agent log
-            if (_dbg2) _dbg2.textContent += '\nPLAY FAILED: ' + err.message;
-            // #endregion
             console.warn('Playback failed:', err);
         });
     }
