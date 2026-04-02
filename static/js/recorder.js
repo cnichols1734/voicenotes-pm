@@ -46,6 +46,7 @@ window.RecorderModule = (() => {
     let currentMeetingId = null;
     let currentTranscript = null;
     let selectedMeetingTypeId = null;
+    let titlePromise = null;        // in-flight AI title generation
 
     // DOM refs (set on openOverlay)
     let overlay, timerEl, canvas, ctx;
@@ -94,6 +95,7 @@ window.RecorderModule = (() => {
         currentMeetingId = null;
         currentTranscript = null;
         selectedMeetingTypeId = null;
+        titlePromise = null;
         isRecording = false;
         if (getEl('recording-timer')) getEl('recording-timer').textContent = '00:00';
         if (getEl('live-transcript')) getEl('live-transcript').style.display = 'none';
@@ -396,6 +398,30 @@ window.RecorderModule = (() => {
             currentTranscript = data.transcript;
             if (getEl('meeting-title-input')) getEl('meeting-title-input').value = '';
 
+            // Fire AI title generation immediately (non-blocking)
+            const titleInput = getEl('meeting-title-input');
+            const spinner = getEl('title-spinner');
+            if (spinner) spinner.style.display = 'inline-flex';
+
+            titlePromise = fetch('/api/recordings/generate-title', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ meeting_id: currentMeetingId }),
+            })
+                .then(r => r.json())
+                .then(result => {
+                    if (result.title && titleInput && !titleInput.value.trim()) {
+                        titleInput.value = result.title;
+                    }
+                    if (spinner) spinner.style.display = 'none';
+                    return result.title || null;
+                })
+                .catch(err => {
+                    console.error('AI title generation failed:', err);
+                    if (spinner) spinner.style.display = 'none';
+                    return null;
+                });
+
             if (window.MeetingsModule && window.MeetingsModule.reload) {
                 window.MeetingsModule.reload();
             }
@@ -527,13 +553,23 @@ window.RecorderModule = (() => {
     // Summarize
     // ---------------------------------------------------------------------------
     async function generateSummary() {
-        const userTitle = (getEl('meeting-title-input') || {}).value || '';
+        const titleInput = getEl('meeting-title-input');
+        let userTitle = (titleInput || {}).value || '';
         const folderId = (getEl('folder-select') || {}).value || null;
 
         showState('summarizing');
 
         try {
-            const summaryPromise = api('/api/recordings/summarize', {
+            // If title is still empty and AI generation is in flight, wait for it
+            if (!userTitle && titlePromise) {
+                const aiTitle = await titlePromise;
+                if (aiTitle && titleInput && !titleInput.value.trim()) {
+                    titleInput.value = aiTitle;
+                }
+                userTitle = (titleInput || {}).value || '';
+            }
+
+            await api('/api/recordings/summarize', {
                 method: 'POST',
                 body: {
                     meeting_id: currentMeetingId,
@@ -542,17 +578,6 @@ window.RecorderModule = (() => {
                     folder_id: folderId || undefined,
                 },
             });
-
-            // Generate AI title in parallel if user didn't provide one
-            const titlePromise = !userTitle
-                ? fetch('/api/recordings/generate-title', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ meeting_id: currentMeetingId }),
-                }).then(r => r.json()).catch(() => null)
-                : Promise.resolve(null);
-
-            const [summaryData] = await Promise.all([summaryPromise, titlePromise]);
 
             showState('complete');
 

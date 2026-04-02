@@ -10,6 +10,7 @@ for synchronized transcript playback.
 """
 import io
 import logging
+import re
 import time
 
 import openai
@@ -22,6 +23,66 @@ logger = logging.getLogger(__name__)
 WHISPER_MAX_BYTES = 24 * 1024 * 1024  # 24 MB
 
 LOCAL_WHISPER_TIMEOUT = 120
+
+# Known Whisper hallucination phrases that appear on silence/noise.
+# These are partial matches — if a segment's text is entirely composed of
+# these (or slight variations), it gets dropped.
+_HALLUCINATION_PATTERNS = [
+    "thank you for watching",
+    "thanks for watching",
+    "thank you for listening",
+    "thanks for listening",
+    "please subscribe",
+    "please like and subscribe",
+    "see you in the next video",
+    "see you next time",
+    "bye bye",
+    "subtitles by",
+    "copyright",
+    "www.",
+    "http",
+]
+
+# CJK Unicode ranges — used to detect non-Latin hallucinations when
+# WHISPER_LANGUAGE is set to a Latin-script language like "en".
+_CJK_RE = re.compile(
+    r"[\u2E80-\u9FFF\uF900-\uFAFF\uFE30-\uFE4F"
+    r"\u3000-\u303F\u3040-\u309F\u30A0-\u30FF\u31F0-\u31FF"
+    r"\uAC00-\uD7AF]"
+)
+
+_LATIN_LANGUAGES = {"en", "es", "fr", "de", "it", "pt", "nl", "pl", "ro", "sv", "da", "no", "fi", "cs", "hu", "tr"}
+
+
+def _is_hallucination(text: str, language: str) -> bool:
+    """Return True if the text looks like a Whisper hallucination."""
+    cleaned = text.strip().lower().rstrip(".!?,;:")
+
+    if not cleaned:
+        return True
+
+    if language in _LATIN_LANGUAGES:
+        total_chars = len(cleaned)
+        cjk_chars = len(_CJK_RE.findall(cleaned))
+        if total_chars > 0 and cjk_chars / total_chars > 0.3:
+            return True
+
+    for pattern in _HALLUCINATION_PATTERNS:
+        if pattern in cleaned:
+            return True
+
+    return False
+
+
+def _filter_hallucinations(segments: list, language: str) -> list:
+    """Remove segments that look like Whisper hallucinations."""
+    filtered = [s for s in segments if not _is_hallucination(s.get("text", ""), language)]
+
+    dropped = len(segments) - len(filtered)
+    if dropped:
+        logger.info("Filtered %d hallucinated segment(s) from %d total.", dropped, len(segments))
+
+    return filtered
 
 
 class NamedBytesIO(io.BytesIO):
@@ -90,9 +151,11 @@ def _transcribe_local(audio_bytes: bytes, file_format: str) -> list:
     files = {
         "file": ("audio.wav", wav_bytes, "audio/wav"),
     }
+    language = Config.WHISPER_LANGUAGE or "en"
     data = {
         "response_format": "verbose_json",
         "no_context": "true",
+        "language": language,
     }
 
     response = requests.post(
@@ -138,11 +201,13 @@ def _transcribe_openai(audio_bytes: bytes, file_format: str) -> list:
     """
     client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
     file_obj = NamedBytesIO(audio_bytes, name=f"audio.{file_format}")
+    language = Config.WHISPER_LANGUAGE or "en"
     response = client.audio.transcriptions.create(
         model="whisper-1",
         file=file_obj,
         response_format="verbose_json",
         timestamp_granularities=["segment"],
+        language=language,
     )
 
     raw_segments = getattr(response, "segments", None) or []
@@ -184,6 +249,8 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> list:
     size_mb = len(audio_bytes) / (1024 * 1024)
 
     # --- Try local Whisper first ---
+    language = Config.WHISPER_LANGUAGE or "en"
+
     if Config.WHISPER_BASE_URL:
         try:
             logger.info("Trying local Whisper at %s (%.1f MB)...", Config.WHISPER_BASE_URL, size_mb)
@@ -191,7 +258,7 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> list:
             segments = _transcribe_local(audio_bytes, file_format)
             elapsed = time.time() - start
             logger.info("Local Whisper succeeded in %.1fs (%d segments).", elapsed, len(segments))
-            return segments
+            return _filter_hallucinations(segments, language)
         except Exception as exc:
             logger.warning("Local Whisper failed (%.1f MB): %s. Falling back to OpenAI.", size_mb, exc)
 
@@ -203,7 +270,7 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> list:
         segments = _transcribe_openai(audio_bytes, file_format)
         elapsed = time.time() - start
         logger.info("OpenAI Whisper succeeded in %.1fs (%d segments).", elapsed, len(segments))
-        return segments
+        return _filter_hallucinations(segments, language)
 
     # Large file: chunk with pydub, merge segments with cumulative time offset
     logger.info("Audio exceeds 24 MB, using pydub chunking for OpenAI...")
@@ -226,4 +293,4 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> list:
         chunk_audio_obj = AudioSegment.from_file(io.BytesIO(chunk), format=file_format)
         cumulative_offset += len(chunk_audio_obj) / 1000.0
 
-    return all_segments
+    return _filter_hallucinations(all_segments, language)
