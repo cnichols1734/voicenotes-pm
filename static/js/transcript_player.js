@@ -1,7 +1,8 @@
 /**
  * VoiceNotes PM - Transcript Player module.
  * Provides synchronized audio playback with sentence-level highlighting,
- * click-to-seek, smooth auto-scroll, and manual scroll override.
+ * click-to-seek, smooth auto-scroll, manual scroll override, and
+ * in-transcript text search.
  *
  * Used by both meetings.js (authenticated detail) and shared.js (public share).
  */
@@ -14,35 +15,99 @@ window.TranscriptPlayer = (() => {
     let containerEl = null;
     let scrollContainer = null;
     let backToPlaybackBtn = null;
+    let searchInput = null;
+    let initialized = false;
 
     // Scroll tracking
     let userScrolledAway = false;
     let programmaticScroll = false;
     let scrollDebounceTimer = null;
 
+    // Search state
+    let searchMatches = [];
+    let currentMatchIdx = -1;
+
+    // Bound handlers for clean removal
+    let boundOnTimeUpdate = null;
+    let boundOnEnded = null;
+    let boundOnPlay = null;
+    let boundOnPause = null;
+    let boundOnLoadedMeta = null;
+    let boundOnTimeUpdateMini = null;
+    let boundOnLoadedMetaMini = null;
+
     function formatTime(seconds) {
-        if (!seconds || !isFinite(seconds)) return '0:00';
+        if (seconds == null || !isFinite(seconds) || seconds < 0) return '0:00';
         const m = Math.floor(seconds / 60);
         const s = Math.floor(seconds % 60);
         return m + ':' + String(s).padStart(2, '0');
     }
 
+    function escapeRegExp(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
     /**
-     * Initialize the transcript player.
-     * @param {HTMLElement} container - The transcript-content container element
-     * @param {Array} segs - Array of {start, end, text} segment objects
-     * @param {string} audioUrl - Signed URL for the audio file
+     * Initialize the transcript player. Safe to call multiple times;
+     * cleans up previous instance first.
      */
     function init(container, segs, audioUrl) {
         if (!container || !segs || !segs.length || !audioUrl) return;
 
+        // Clean up any previous instance
+        destroy();
+
         containerEl = container;
         segments = segs;
+        initialized = true;
 
-        // Build the player DOM
         container.innerHTML = '';
         container.classList.add('transcript-player-active');
         container.style.display = 'block';
+
+        // Search bar
+        const searchBar = document.createElement('div');
+        searchBar.className = 'transcript-search-bar';
+
+        searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.className = 'transcript-search-input';
+        searchInput.placeholder = 'Search transcript...';
+        searchInput.addEventListener('input', onSearchInput);
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                if (e.shiftKey) navigateSearch(-1);
+                else navigateSearch(1);
+            }
+            if (e.key === 'Escape') {
+                searchInput.value = '';
+                clearSearch();
+                searchInput.blur();
+            }
+        });
+
+        const searchCount = document.createElement('span');
+        searchCount.className = 'transcript-search-count';
+        searchCount.id = 'transcript-search-count';
+
+        const prevBtn = document.createElement('button');
+        prevBtn.className = 'transcript-search-nav';
+        prevBtn.title = 'Previous match';
+        prevBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg>';
+        prevBtn.addEventListener('click', () => navigateSearch(-1));
+
+        const nextBtn = document.createElement('button');
+        nextBtn.className = 'transcript-search-nav';
+        nextBtn.title = 'Next match';
+        nextBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+        nextBtn.addEventListener('click', () => navigateSearch(1));
+
+        searchBar.appendChild(searchInput);
+        searchBar.appendChild(searchCount);
+        searchBar.appendChild(prevBtn);
+        searchBar.appendChild(nextBtn);
+        container.appendChild(searchBar);
 
         // Scroll wrapper for segments
         scrollContainer = document.createElement('div');
@@ -52,11 +117,11 @@ window.TranscriptPlayer = (() => {
         // Render segment spans
         segmentEls = [];
         segments.forEach((seg, idx) => {
-            const span = document.createElement('div');
-            span.className = 'transcript-segment';
-            span.dataset.idx = idx;
-            span.dataset.start = seg.start;
-            span.dataset.end = seg.end;
+            const row = document.createElement('div');
+            row.className = 'transcript-segment';
+            row.dataset.idx = idx;
+            row.dataset.start = seg.start;
+            row.dataset.end = seg.end;
 
             const ts = document.createElement('span');
             ts.className = 'segment-timestamp';
@@ -66,21 +131,13 @@ window.TranscriptPlayer = (() => {
             txt.className = 'segment-text';
             txt.textContent = seg.text;
 
-            span.appendChild(ts);
-            span.appendChild(txt);
+            row.appendChild(ts);
+            row.appendChild(txt);
 
-            span.addEventListener('click', () => {
-                if (audio) {
-                    audio.currentTime = seg.start;
-                    audio.play();
-                    setActiveSegment(idx);
-                    userScrolledAway = false;
-                    hideBackToPlayback();
-                }
-            });
+            row.addEventListener('click', () => onSegmentClick(idx));
 
-            scrollContainer.appendChild(span);
-            segmentEls.push(span);
+            scrollContainer.appendChild(row);
+            segmentEls.push(row);
         });
 
         // "Back to playback" floating button
@@ -97,23 +154,37 @@ window.TranscriptPlayer = (() => {
         });
         container.appendChild(backToPlaybackBtn);
 
-        // Create audio element
+        // Create audio element — preload auto so play at 0 works immediately
         audio = new Audio(audioUrl);
-        audio.preload = 'metadata';
+        audio.preload = 'auto';
 
-        // Sync playback highlighting
-        audio.addEventListener('timeupdate', onTimeUpdate);
-        audio.addEventListener('ended', onEnded);
-        audio.addEventListener('loadedmetadata', () => {
-            const totalEl = document.getElementById('player-time-total');
-            if (totalEl) totalEl.textContent = formatTime(audio.duration);
-        });
+        // Bind all event handlers (stored for clean removal)
+        boundOnTimeUpdate = onTimeUpdate;
+        boundOnEnded = onEnded;
+        audio.addEventListener('timeupdate', boundOnTimeUpdate);
+        audio.addEventListener('ended', boundOnEnded);
 
         // Detect manual scrolling
         scrollContainer.addEventListener('scroll', onUserScroll, { passive: true });
 
         // Wire up mini-player controls
         initMiniPlayer();
+    }
+
+    function onSegmentClick(idx) {
+        if (!audio) return;
+        const seg = segments[idx];
+        if (!seg) return;
+
+        audio.currentTime = seg.start;
+        setActiveSegment(idx);
+        updateProgressBar();
+        userScrolledAway = false;
+        hideBackToPlayback();
+
+        audio.play().catch((err) => {
+            console.warn('Playback failed:', err);
+        });
     }
 
     function initMiniPlayer() {
@@ -128,61 +199,88 @@ window.TranscriptPlayer = (() => {
         const progressFill = document.getElementById('player-progress-fill');
         const speedSelect = document.getElementById('player-speed');
 
+        // Remove any stale listeners from previous init by cloning nodes
         if (playPauseBtn) {
-            playPauseBtn.addEventListener('click', () => {
+            const fresh = playPauseBtn.cloneNode(true);
+            playPauseBtn.parentNode.replaceChild(fresh, playPauseBtn);
+            fresh.addEventListener('click', () => {
+                if (!audio) return;
                 if (audio.paused) {
-                    audio.play();
+                    audio.play().catch((err) => console.warn('Play failed:', err));
                 } else {
                     audio.pause();
                 }
             });
         }
 
-        audio.addEventListener('play', () => {
-            if (playPauseBtn) playPauseBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
-        });
-
-        audio.addEventListener('pause', () => {
-            if (playPauseBtn) playPauseBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
-        });
-
-        audio.addEventListener('timeupdate', () => {
-            if (currentTimeEl) currentTimeEl.textContent = formatTime(audio.currentTime);
-            if (progressFill && audio.duration) {
-                progressFill.style.width = ((audio.currentTime / audio.duration) * 100) + '%';
-            }
-        });
-
-        audio.addEventListener('loadedmetadata', () => {
-            if (totalTimeEl) totalTimeEl.textContent = formatTime(audio.duration);
-        });
-
-        // Click on progress bar to seek
         if (progressBar) {
-            progressBar.addEventListener('click', (e) => {
-                if (!audio.duration) return;
-                const rect = progressBar.getBoundingClientRect();
-                const pct = (e.clientX - rect.left) / rect.width;
+            const freshBar = progressBar.cloneNode(true);
+            progressBar.parentNode.replaceChild(freshBar, progressBar);
+            freshBar.addEventListener('click', (e) => {
+                if (!audio || !audio.duration) return;
+                const rect = freshBar.getBoundingClientRect();
+                const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
                 audio.currentTime = pct * audio.duration;
+                updateProgressBar();
             });
         }
 
-        // Playback speed
         if (speedSelect) {
-            speedSelect.addEventListener('change', () => {
-                audio.playbackRate = parseFloat(speedSelect.value);
+            const freshSpeed = speedSelect.cloneNode(true);
+            speedSelect.parentNode.replaceChild(freshSpeed, speedSelect);
+            freshSpeed.addEventListener('change', () => {
+                if (audio) audio.playbackRate = parseFloat(freshSpeed.value);
             });
+        }
+
+        boundOnPlay = () => {
+            const btn = document.getElementById('player-play-pause');
+            if (btn) btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+        };
+        boundOnPause = () => {
+            const btn = document.getElementById('player-play-pause');
+            if (btn) btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>';
+        };
+        boundOnTimeUpdateMini = () => {
+            if (!audio) return;
+            if (currentTimeEl) currentTimeEl.textContent = formatTime(audio.currentTime);
+            updateProgressBar();
+        };
+        boundOnLoadedMetaMini = () => {
+            if (!audio) return;
+            if (totalTimeEl) totalTimeEl.textContent = formatTime(audio.duration);
+        };
+
+        audio.addEventListener('play', boundOnPlay);
+        audio.addEventListener('pause', boundOnPause);
+        audio.addEventListener('timeupdate', boundOnTimeUpdateMini);
+        audio.addEventListener('loadedmetadata', boundOnLoadedMetaMini);
+
+        // If metadata already loaded (cached), set total now
+        if (audio.duration && isFinite(audio.duration)) {
+            if (totalTimeEl) totalTimeEl.textContent = formatTime(audio.duration);
         }
     }
 
+    function updateProgressBar() {
+        const fill = document.getElementById('player-progress-fill');
+        if (fill && audio && audio.duration) {
+            fill.style.width = ((audio.currentTime / audio.duration) * 100) + '%';
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Playback sync
+    // -----------------------------------------------------------------------
     function onTimeUpdate() {
         if (!audio || !segments.length) return;
         const t = audio.currentTime;
 
-        // Find the active segment (linear scan is fine for typical segment counts)
         let newIdx = -1;
         for (let i = 0; i < segments.length; i++) {
-            if (t >= segments[i].start && (i === segments.length - 1 || t < segments[i + 1].start)) {
+            const segStart = segments[i].start;
+            const nextStart = (i < segments.length - 1) ? segments[i + 1].start : Infinity;
+            if (t >= segStart && t < nextStart) {
                 newIdx = i;
                 break;
             }
@@ -201,7 +299,7 @@ window.TranscriptPlayer = (() => {
             segmentEls[activeIdx].classList.remove('active');
         }
         activeIdx = idx;
-        if (segmentEls[idx]) {
+        if (idx >= 0 && segmentEls[idx]) {
             segmentEls[idx].classList.add('active');
         }
     }
@@ -214,7 +312,7 @@ window.TranscriptPlayer = (() => {
         clearTimeout(scrollDebounceTimer);
         scrollDebounceTimer = setTimeout(() => {
             programmaticScroll = false;
-        }, 400);
+        }, 500);
     }
 
     function onUserScroll() {
@@ -239,21 +337,130 @@ window.TranscriptPlayer = (() => {
         activeIdx = -1;
     }
 
-    /**
-     * Get plain text for clipboard copy (without timestamps).
-     */
+    // -----------------------------------------------------------------------
+    // Transcript search
+    // -----------------------------------------------------------------------
+    function onSearchInput() {
+        const query = (searchInput.value || '').trim();
+        if (!query || query.length < 2) {
+            clearSearch();
+            return;
+        }
+        performSearch(query);
+    }
+
+    function performSearch(query) {
+        clearSearchHighlights();
+        searchMatches = [];
+        currentMatchIdx = -1;
+
+        const regex = new RegExp('(' + escapeRegExp(query) + ')', 'gi');
+
+        segments.forEach((seg, idx) => {
+            const el = segmentEls[idx];
+            if (!el) return;
+            const textSpan = el.querySelector('.segment-text');
+            if (!textSpan) return;
+
+            if (regex.test(seg.text)) {
+                regex.lastIndex = 0;
+                el.classList.add('search-match');
+                searchMatches.push(idx);
+
+                // Highlight matching text within the span
+                const parts = seg.text.split(regex);
+                textSpan.innerHTML = '';
+                parts.forEach(part => {
+                    if (regex.test(part)) {
+                        const mark = document.createElement('mark');
+                        mark.className = 'transcript-highlight';
+                        mark.textContent = part;
+                        textSpan.appendChild(mark);
+                    } else {
+                        textSpan.appendChild(document.createTextNode(part));
+                    }
+                    regex.lastIndex = 0;
+                });
+            }
+        });
+
+        updateSearchCount();
+        if (searchMatches.length > 0) {
+            currentMatchIdx = 0;
+            scrollToMatch(0);
+        }
+    }
+
+    function navigateSearch(direction) {
+        if (!searchMatches.length) return;
+        currentMatchIdx = (currentMatchIdx + direction + searchMatches.length) % searchMatches.length;
+        scrollToMatch(currentMatchIdx);
+        updateSearchCount();
+    }
+
+    function scrollToMatch(matchIdx) {
+        const segIdx = searchMatches[matchIdx];
+        const el = segmentEls[segIdx];
+        if (!el) return;
+
+        // Remove focus class from all, add to current
+        segmentEls.forEach(e => e.classList.remove('search-focus'));
+        el.classList.add('search-focus');
+
+        programmaticScroll = true;
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        clearTimeout(scrollDebounceTimer);
+        scrollDebounceTimer = setTimeout(() => {
+            programmaticScroll = false;
+        }, 500);
+    }
+
+    function updateSearchCount() {
+        const el = document.getElementById('transcript-search-count');
+        if (!el) return;
+        if (searchMatches.length > 0) {
+            el.textContent = (currentMatchIdx + 1) + '/' + searchMatches.length;
+        } else if (searchInput && searchInput.value.trim().length >= 2) {
+            el.textContent = 'No results';
+        } else {
+            el.textContent = '';
+        }
+    }
+
+    function clearSearch() {
+        clearSearchHighlights();
+        searchMatches = [];
+        currentMatchIdx = -1;
+        const el = document.getElementById('transcript-search-count');
+        if (el) el.textContent = '';
+    }
+
+    function clearSearchHighlights() {
+        segmentEls.forEach((el, idx) => {
+            el.classList.remove('search-match', 'search-focus');
+            const textSpan = el.querySelector('.segment-text');
+            if (textSpan) {
+                textSpan.textContent = segments[idx].text;
+            }
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // Public API
+    // -----------------------------------------------------------------------
     function getPlainText() {
         return segments.map(s => s.text).join('\n\n');
     }
 
-    /**
-     * Clean up player state.
-     */
     function destroy() {
         if (audio) {
             audio.pause();
-            audio.removeEventListener('timeupdate', onTimeUpdate);
-            audio.removeEventListener('ended', onEnded);
+            if (boundOnTimeUpdate) audio.removeEventListener('timeupdate', boundOnTimeUpdate);
+            if (boundOnEnded) audio.removeEventListener('ended', boundOnEnded);
+            if (boundOnPlay) audio.removeEventListener('play', boundOnPlay);
+            if (boundOnPause) audio.removeEventListener('pause', boundOnPause);
+            if (boundOnTimeUpdateMini) audio.removeEventListener('timeupdate', boundOnTimeUpdateMini);
+            if (boundOnLoadedMetaMini) audio.removeEventListener('loadedmetadata', boundOnLoadedMetaMini);
             audio.src = '';
             audio = null;
         }
@@ -262,13 +469,26 @@ window.TranscriptPlayer = (() => {
         }
         const player = document.getElementById('audio-mini-player');
         if (player) player.style.display = 'none';
+        clearTimeout(scrollDebounceTimer);
         segments = [];
         segmentEls = [];
         activeIdx = -1;
         userScrolledAway = false;
+        programmaticScroll = false;
         containerEl = null;
         scrollContainer = null;
         backToPlaybackBtn = null;
+        searchInput = null;
+        searchMatches = [];
+        currentMatchIdx = -1;
+        initialized = false;
+        boundOnTimeUpdate = null;
+        boundOnEnded = null;
+        boundOnPlay = null;
+        boundOnPause = null;
+        boundOnLoadedMeta = null;
+        boundOnTimeUpdateMini = null;
+        boundOnLoadedMetaMini = null;
     }
 
     return { init, destroy, getPlainText };

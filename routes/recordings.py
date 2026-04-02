@@ -238,9 +238,10 @@ def upload_recording():
                 audio_path = upload_audio(
                     str(current_user.id), meeting["id"], audio_bytes, mime_type,
                 )
+                stored_mime = "audio/mpeg" if audio_path.endswith(".mp3") else mime_type
                 supabase.table("meetings").update({
                     "audio_path": audio_path,
-                    "audio_mime_type": mime_type,
+                    "audio_mime_type": stored_mime,
                 }).eq("id", meeting["id"]).execute()
             except Exception as exc:
                 logger.error("Audio storage failed for meeting %s: %s", meeting["id"], exc)
