@@ -1971,7 +1971,8 @@ mark.search-highlight {
   border-radius: 3px;
   cursor: pointer;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
+  transition: height 0.1s ease;
 }
 
 .player-progress-fill {
@@ -1979,10 +1980,37 @@ mark.search-highlight {
   background: var(--primary);
   border-radius: 3px;
   width: 0;
+  position: relative;
+}
+
+.player-progress-fill::after {
+  content: '';
+  position: absolute;
+  right: -5px;
+  top: 50%;
+  transform: translateY(-50%) scale(0);
+  width: 10px;
+  height: 10px;
+  background: var(--primary);
+  border-radius: 50%;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+  transition: transform 0.15s ease;
+}
+
+.player-progress-bar:hover .player-progress-fill::after {
+  transform: translateY(-50%) scale(1);
 }
 
 .player-progress-bar:hover .player-progress-fill {
   background: var(--primary-hover);
+}
+
+.player-progress-bar:hover .player-progress-fill::after {
+  background: var(--primary-hover);
+}
+
+.player-progress-bar:hover {
+  height: 8px;
 }
 
 .player-speed {

@@ -501,7 +501,6 @@ window.RecorderModule = (() => {
                 selectedMeetingTypeId = type.id;
                 setTimeout(() => {
                     showState('details');
-                    autoGenerateTitle();
                 }, 300);
             });
             grid.appendChild(card);
@@ -528,21 +527,32 @@ window.RecorderModule = (() => {
     // Summarize
     // ---------------------------------------------------------------------------
     async function generateSummary() {
-        const title = (getEl('meeting-title-input') || {}).value || '';
+        const userTitle = (getEl('meeting-title-input') || {}).value || '';
         const folderId = (getEl('folder-select') || {}).value || null;
 
         showState('summarizing');
 
         try {
-            const data = await api('/api/recordings/summarize', {
+            const summaryPromise = api('/api/recordings/summarize', {
                 method: 'POST',
                 body: {
                     meeting_id: currentMeetingId,
                     meeting_type_id: selectedMeetingTypeId,
-                    title: title || undefined,
+                    title: userTitle || undefined,
                     folder_id: folderId || undefined,
                 },
             });
+
+            // Generate AI title in parallel if user didn't provide one
+            const titlePromise = !userTitle
+                ? fetch('/api/recordings/generate-title', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ meeting_id: currentMeetingId }),
+                }).then(r => r.json()).catch(() => null)
+                : Promise.resolve(null);
+
+            const [summaryData] = await Promise.all([summaryPromise, titlePromise]);
 
             showState('complete');
 
@@ -568,45 +578,6 @@ window.RecorderModule = (() => {
     // ---------------------------------------------------------------------------
     // Event bindings (called once on DOMContentLoaded)
     // ---------------------------------------------------------------------------
-    async function autoGenerateTitle() {
-        const input = getEl('meeting-title-input');
-        const spinner = getEl('title-spinner');
-        if (!input) return;
-        if (!currentMeetingId) return;
-
-        input.value = '';
-        input.placeholder = 'Generating title...';
-        if (spinner) spinner.style.display = 'flex';
-
-        try {
-            const response = await fetch('/api/recordings/generate-title', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ meeting_id: currentMeetingId }),
-            });
-
-            let data;
-            const text = await response.text();
-            try {
-                data = JSON.parse(text);
-            } catch (parseErr) {
-                console.error('Title response not JSON:', text.slice(0, 200));
-                input.placeholder = 'Enter meeting title...';
-                if (spinner) spinner.style.display = 'none';
-                return;
-            }
-
-            if (response.ok && data.title) {
-                input.value = data.title;
-            }
-        } catch (err) {
-            console.error('Title generation failed:', err);
-        }
-
-        input.placeholder = 'Enter meeting title...';
-        if (spinner) spinner.style.display = 'none';
-    }
-
     function bindEvents() {
         const stopBtn = getEl('stop-recording-btn');
         if (stopBtn) stopBtn.addEventListener('click', stopRecording);
