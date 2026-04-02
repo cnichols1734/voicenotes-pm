@@ -541,6 +541,7 @@ window.MeetingsModule = (() => {
             startPresencePolling(meetingId);
             initComments(meetingId);
             alignCommentsPanel();
+            window.addEventListener('resize', alignCommentsPanel);
         } catch (err) {
             showToast(`Failed to load meeting: ${err.message}`, 'error');
         }
@@ -1303,6 +1304,9 @@ window.MeetingsModule = (() => {
                 const panel = getEl(`tab-${btn.dataset.tab}`);
                 if (panel) panel.classList.add('active');
 
+                // Re-align comments panel after tab content changes
+                alignCommentsPanel();
+
                 // Auto-scroll so the chat input is visible on mobile
                 if (btn.dataset.tab === 'chat') {
                     const chatInput = getEl('chat-input');
@@ -1998,11 +2002,19 @@ window.MeetingsModule = (() => {
 
     function alignCommentsPanel() {
         const panel = getEl('comments-panel');
-        const anchor = document.querySelector('.meeting-main .summary-section') ||
-                       document.querySelector('.meeting-main .tab-panel.active');
         const layout = document.querySelector('.meeting-layout');
-        if (!panel || !anchor || !layout) return;
+        if (!panel || !layout) return;
         if (window.innerWidth <= 960) { panel.style.marginTop = ''; return; }
+
+        // Anchor to the first visible content: the mini-player if visible,
+        // otherwise the first summary section or active tab panel.
+        const player = getEl('audio-mini-player');
+        const anchor = (player && player.style.display !== 'none' && player.offsetParent !== null)
+            ? player
+            : document.querySelector('.meeting-main .summary-section') ||
+              document.querySelector('.meeting-main .tab-panel.active');
+        if (!anchor) return;
+
         const layoutTop = layout.getBoundingClientRect().top + window.scrollY;
         const anchorTop = anchor.getBoundingClientRect().top + window.scrollY;
         panel.style.marginTop = (anchorTop - layoutTop) + 'px';
