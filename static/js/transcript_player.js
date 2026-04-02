@@ -17,6 +17,8 @@ window.TranscriptPlayer = (() => {
     let backToPlaybackBtn = null;
     let searchInput = null;
     let initialized = false;
+    let stickyObserver = null;
+    let stickySentinel = null;
 
     // Scroll tracking
     let userScrolledAway = false;
@@ -169,6 +171,9 @@ window.TranscriptPlayer = (() => {
 
         // Wire up mini-player controls
         initMiniPlayer();
+
+        // Observe sticky state for visual feedback
+        initStickyObserver();
     }
 
     function onSegmentClick(idx) {
@@ -260,6 +265,30 @@ window.TranscriptPlayer = (() => {
         if (audio.duration && isFinite(audio.duration)) {
             if (totalTimeEl) totalTimeEl.textContent = formatTime(audio.duration);
         }
+    }
+
+    function initStickyObserver() {
+        var player = document.getElementById('audio-mini-player');
+        if (!player || !('IntersectionObserver' in window)) return;
+
+        // Insert a zero-height sentinel element right before the player.
+        // When the sentinel scrolls out of the viewport, the player is stuck.
+        stickySentinel = document.createElement('div');
+        stickySentinel.style.height = '0';
+        stickySentinel.style.margin = '0';
+        stickySentinel.style.padding = '0';
+        stickySentinel.setAttribute('aria-hidden', 'true');
+        player.parentNode.insertBefore(stickySentinel, player);
+
+        stickyObserver = new IntersectionObserver(
+            function(entries) {
+                entries.forEach(function(entry) {
+                    player.classList.toggle('stuck', !entry.isIntersecting);
+                });
+            },
+            { threshold: 0 }
+        );
+        stickyObserver.observe(stickySentinel);
     }
 
     function updateProgressBar() {
@@ -467,8 +496,19 @@ window.TranscriptPlayer = (() => {
         if (scrollContainer) {
             scrollContainer.removeEventListener('scroll', onUserScroll);
         }
+        if (stickyObserver) {
+            stickyObserver.disconnect();
+            stickyObserver = null;
+        }
+        if (stickySentinel && stickySentinel.parentNode) {
+            stickySentinel.parentNode.removeChild(stickySentinel);
+            stickySentinel = null;
+        }
         const player = document.getElementById('audio-mini-player');
-        if (player) player.style.display = 'none';
+        if (player) {
+            player.style.display = 'none';
+            player.classList.remove('stuck');
+        }
         clearTimeout(scrollDebounceTimer);
         segments = [];
         segmentEls = [];
