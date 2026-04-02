@@ -37,8 +37,7 @@ window.RecorderModule = (() => {
     let isRecording = false;
 
     // Audio + segment accumulators for final upload
-    let continuousRecorder = null; // single uninterrupted recorder for the final audio file
-    let allRecordedBlobs = [];     // blobs from continuousRecorder (one valid WebM stream)
+    let allRecordedBlobs = [];     // all audio blobs across rotations (concatenated WebM — remuxed server-side)
     let timedSegments = [];        // [{start, end, text}, ...] with offsets applied
     let chunkStartTime = 0;        // elapsed seconds when current chunk started
 
@@ -87,7 +86,6 @@ window.RecorderModule = (() => {
         stopEverything();
         audioChunks = [];
         allRecordedBlobs = [];
-        continuousRecorder = null;
         transcriptSegments = [];
         timedSegments = [];
         chunkStartTime = 0;
@@ -137,12 +135,8 @@ window.RecorderModule = (() => {
         source.connect(analyserNode);
         drawWaveform();
 
-        // Start continuous recorder (never stopped during session — produces valid single WebM)
         isRecording = true;
         chunkStartTime = 0;
-        startContinuousRecorder();
-
-        // Start first chunked recorder segment (stopped/restarted for transcription)
         startRecorderSegment();
 
         // Timer
@@ -172,17 +166,6 @@ window.RecorderModule = (() => {
             : 'audio/webm';
     }
 
-    function startContinuousRecorder() {
-        const mimeType = getMimeType();
-        continuousRecorder = new MediaRecorder(stream, { mimeType });
-        continuousRecorder.ondataavailable = e => {
-            if (e.data.size > 0) {
-                allRecordedBlobs.push(e.data);
-            }
-        };
-        continuousRecorder.start(1000);
-    }
-
     function startRecorderSegment() {
         audioChunks = [];
         const mimeType = getMimeType();
@@ -190,6 +173,7 @@ window.RecorderModule = (() => {
         mediaRecorder.ondataavailable = e => {
             if (e.data.size > 0) {
                 audioChunks.push(e.data);
+                allRecordedBlobs.push(e.data);
             }
         };
         mediaRecorder.start(500);
@@ -306,11 +290,6 @@ window.RecorderModule = (() => {
         window.removeEventListener('beforeunload', beforeUnloadHandler);
 
         showState('processing');
-
-        // Stop the continuous recorder first so allRecordedBlobs is complete
-        if (continuousRecorder && continuousRecorder.state !== 'inactive') {
-            continuousRecorder.stop();
-        }
 
         if (mediaRecorder && mediaRecorder.state === 'recording') {
             const finalChunks = audioChunks;
@@ -437,11 +416,6 @@ window.RecorderModule = (() => {
         isRecording = false;
         clearInterval(chunkRotateInterval);
         chunkRotateInterval = null;
-        if (continuousRecorder && continuousRecorder.state !== 'inactive') {
-            continuousRecorder.onstop = null;
-            continuousRecorder.stop();
-        }
-        continuousRecorder = null;
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
             mediaRecorder.onstop = null;
             mediaRecorder.stop();
