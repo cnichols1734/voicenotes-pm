@@ -17,24 +17,46 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 
-TITLE_PROMPT = """Generate a short, descriptive title for this meeting based on the transcript below. The title should:
+TITLE_PROMPT = """Generate a short, descriptive title for this meeting based on the transcript excerpts below. The title should:
 - Be 3-8 words long
-- Capture the main topic or purpose of the meeting
+- Capture the OVERALL main topic or purpose of the entire meeting
 - Be professional and clear
 - NOT include the word "Meeting" unless it's essential for clarity
 - NOT use quotes around the title
+- Reflect the full scope of the discussion, not just what was said at the beginning
 
 Respond with ONLY the title text, nothing else.
 
-TRANSCRIPT:
+TRANSCRIPT EXCERPTS:
 {transcript}"""
+
+MAX_PROMPT_CHARS = 3000
 
 
 def _build_messages(transcript: str) -> list:
-    """Build the chat messages for title generation."""
-    truncated = transcript[:2000] if len(transcript) > 2000 else transcript
+    """Build the chat messages for title generation.
+
+    Samples from beginning, middle, and end of the transcript so the LLM
+    gets a holistic view of the meeting rather than just the opening remarks.
+    """
+    if len(transcript) <= MAX_PROMPT_CHARS:
+        sample = transcript
+    else:
+        section_budget = MAX_PROMPT_CHARS // 3
+        beginning = transcript[:section_budget]
+        mid_start = (len(transcript) - section_budget) // 2
+        middle = transcript[mid_start:mid_start + section_budget]
+        ending = transcript[-section_budget:]
+        sample = (
+            beginning.rstrip()
+            + "\n\n[...]\n\n"
+            + middle.strip()
+            + "\n\n[...]\n\n"
+            + ending.lstrip()
+        )
+
     return [
-        {"role": "system", "content": TITLE_PROMPT.replace("{transcript}", truncated)},
+        {"role": "system", "content": TITLE_PROMPT.replace("{transcript}", sample)},
         {"role": "user", "content": "Generate a title for this meeting."},
     ]
 
