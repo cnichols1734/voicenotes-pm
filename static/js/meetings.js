@@ -530,7 +530,7 @@ window.MeetingsModule = (() => {
 
             renderDetailHeader(meeting, types, folders);
             renderSummary(meeting.summary);
-            renderTranscript(meeting.transcript);
+            renderTranscriptOrPlayer(meeting);
             populateDetailFolderSelect(folders, meeting.folder_id);
             populateResurfaceGrid(types);
 
@@ -1165,6 +1165,28 @@ window.MeetingsModule = (() => {
         }
     }
 
+    function renderTranscriptOrPlayer(meeting) {
+        const contentEl = getEl('transcript-content');
+        const emptyEl = getEl('transcript-empty');
+        const transcript = meeting.transcript;
+        const segments = meeting.transcript_segments;
+        const audioUrl = meeting.audio_url;
+
+        if (segments && segments.length && audioUrl && window.TranscriptPlayer) {
+            if (emptyEl) emptyEl.style.display = 'none';
+            window.TranscriptPlayer.init(contentEl, segments, audioUrl);
+        } else if (transcript) {
+            if (contentEl) {
+                contentEl.textContent = transcript;
+                contentEl.style.display = 'block';
+            }
+            if (emptyEl) emptyEl.style.display = 'none';
+        } else {
+            if (contentEl) contentEl.style.display = 'none';
+            if (emptyEl) emptyEl.style.display = 'flex';
+        }
+    }
+
     function renderTranscript(transcript) {
         const contentEl = getEl('transcript-content');
         const emptyEl = getEl('transcript-empty');
@@ -1382,9 +1404,16 @@ window.MeetingsModule = (() => {
         const copyTransBtn = getEl('copy-transcript-btn');
         if (copyTransBtn) {
             copyTransBtn.addEventListener('click', async () => {
-                const el = getEl('transcript-content');
+                let text = '';
+                if (window.TranscriptPlayer && window.TranscriptPlayer.getPlainText) {
+                    text = window.TranscriptPlayer.getPlainText();
+                }
+                if (!text) {
+                    const el = getEl('transcript-content');
+                    text = el ? el.textContent : '';
+                }
                 try {
-                    await navigator.clipboard.writeText(el ? el.textContent : '');
+                    await navigator.clipboard.writeText(text);
                     showToast('Transcript copied.', 'success');
                 } catch (e) {
                     showToast('Could not copy.', 'error');
@@ -1645,7 +1674,7 @@ window.MeetingsModule = (() => {
             lastKnownUpdatedAt = meeting.updated_at;
 
             renderSummary(meeting.summary);
-            renderTranscript(meeting.transcript);
+            renderTranscriptOrPlayer(meeting);
 
             const titleEl = getEl('meeting-title');
             if (titleEl && !titleEl.matches(':focus') && titleEl.textContent !== meeting.title) {

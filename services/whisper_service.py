@@ -5,8 +5,8 @@ Supports two backends:
   1. Local whisper.cpp server — tried first if WHISPER_BASE_URL is set
   2. OpenAI Whisper API — used as fallback, or as primary if no local URL configured
 
-The local backend uses whisper.cpp's /inference endpoint.
-The OpenAI backend uses the standard /v1/audio/transcriptions endpoint.
+Returns segment-level timestamped data (list of dicts with start/end/text)
+for synchronized transcript playback.
 """
 import io
 import logging
@@ -19,10 +19,8 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
-# Whisper API limit is 25MB; use 24MB as a safe ceiling
 WHISPER_MAX_BYTES = 24 * 1024 * 1024  # 24 MB
 
-# Timeout for local Whisper requests (seconds)
 LOCAL_WHISPER_TIMEOUT = 120
 
 
@@ -32,6 +30,11 @@ class NamedBytesIO(io.BytesIO):
     def __init__(self, data: bytes, name: str):
         super().__init__(data)
         self.name = name
+
+
+def segments_to_text(segments: list) -> str:
+    """Join segment dicts into a plain-text transcript string."""
+    return "\n\n".join(seg["text"] for seg in segments if seg.get("text"))
 
 
 def _convert_to_wav(audio_bytes: bytes, file_format: str) -> bytes:
@@ -53,9 +56,9 @@ def _convert_to_wav(audio_bytes: bytes, file_format: str) -> bytes:
         result = subprocess.run(
             [
                 "ffmpeg", "-y", "-i", tmp_in_path,
-                "-ar", "16000",   # 16kHz sample rate (Whisper's native rate)
-                "-ac", "1",       # mono
-                "-c:a", "pcm_s16le",  # 16-bit PCM
+                "-ar", "16000",
+                "-ac", "1",
+                "-c:a", "pcm_s16le",
                 tmp_out_path,
             ],
             capture_output=True,
@@ -76,13 +79,11 @@ def _convert_to_wav(audio_bytes: bytes, file_format: str) -> bytes:
             os.unlink(tmp_out_path)
 
 
-def _transcribe_local(audio_bytes: bytes, file_format: str) -> str:
+def _transcribe_local(audio_bytes: bytes, file_format: str) -> list:
     """
     Transcribe audio using a local whisper.cpp server.
-    Converts to WAV first (whisper.cpp needs WAV format).
-    Uses plain /inference endpoint (no diarization).
+    Returns a list of segment dicts [{start, end, text}, ...].
     """
-    # Convert to WAV — whisper.cpp can't decode webm/opus natively
     wav_bytes = _convert_to_wav(audio_bytes, file_format)
 
     base_url = Config.WHISPER_BASE_URL.rstrip("/")
@@ -90,8 +91,8 @@ def _transcribe_local(audio_bytes: bytes, file_format: str) -> str:
         "file": ("audio.wav", wav_bytes, "audio/wav"),
     }
     data = {
-        "response_format": "json",
-        "no_context": "true",  # prevent hallucination loops
+        "response_format": "verbose_json",
+        "no_context": "true",
     }
 
     response = requests.post(
@@ -102,39 +103,83 @@ def _transcribe_local(audio_bytes: bytes, file_format: str) -> str:
     )
     response.raise_for_status()
     result = response.json()
+
+    # whisper.cpp verbose_json returns segments with timestamps
+    raw_segments = result.get("segments") or result.get("transcription") or []
+    if raw_segments and isinstance(raw_segments[0], dict) and "start" in raw_segments[0]:
+        segments = [
+            {
+                "start": float(s.get("t0", s.get("start", 0)) if isinstance(s.get("t0", s.get("start", 0)), (int, float)) else 0),
+                "end": float(s.get("t1", s.get("end", 0)) if isinstance(s.get("t1", s.get("end", 0)), (int, float)) else 0),
+                "text": (s.get("text") or "").strip(),
+            }
+            for s in raw_segments
+            if (s.get("text") or "").strip()
+        ]
+        if segments:
+            logger.info("Local Whisper returned %d segments.", len(segments))
+            return segments
+
+    # Fallback: plain text wrapped as a single segment
     text = result.get("text", "").strip()
-    logger.info("Local Whisper returned: '%s'", text[:100] if text else "(empty)")
-    return text
+    if not text and raw_segments:
+        text = " ".join((s.get("text", "") if isinstance(s, dict) else str(s)) for s in raw_segments).strip()
+
+    logger.info("Local Whisper returned plain text (no segments): '%s'", text[:100] if text else "(empty)")
+    if text:
+        return [{"start": 0.0, "end": 0.0, "text": text}]
+    return []
 
 
-def _transcribe_openai(audio_bytes: bytes, file_format: str) -> str:
-    """Transcribe audio using OpenAI Whisper API."""
+def _transcribe_openai(audio_bytes: bytes, file_format: str) -> list:
+    """
+    Transcribe audio using OpenAI Whisper API with verbose_json.
+    Returns a list of segment dicts [{start, end, text}, ...].
+    """
     client = openai.OpenAI(api_key=Config.OPENAI_API_KEY)
     file_obj = NamedBytesIO(audio_bytes, name=f"audio.{file_format}")
     response = client.audio.transcriptions.create(
         model="whisper-1",
         file=file_obj,
+        response_format="verbose_json",
+        timestamp_granularities=["segment"],
     )
-    return response.text.strip()
+
+    raw_segments = getattr(response, "segments", None) or []
+    segments = [
+        {
+            "start": round(float(s.start), 2),
+            "end": round(float(s.end), 2),
+            "text": s.text.strip(),
+        }
+        for s in raw_segments
+        if s.text.strip()
+    ]
+
+    if segments:
+        return segments
+
+    # Fallback if API returned text but no segments
+    text = getattr(response, "text", "").strip()
+    if text:
+        return [{"start": 0.0, "end": 0.0, "text": text}]
+    return []
 
 
-def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> str:
+def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> list:
     """
     Transcribe audio using Whisper.
 
+    Returns a list of segment dicts: [{"start": float, "end": float, "text": str}, ...]
+
     Strategy:
       1. If WHISPER_BASE_URL is configured, try the local whisper.cpp server first.
-      2. If local fails (connection error, timeout, etc.), fall back to OpenAI.
+      2. If local fails, fall back to OpenAI.
       3. If no local URL is configured, go straight to OpenAI.
-
-    With streaming transcription, each chunk is typically ~60s of audio (< 2 MB),
-    so chunking is rarely needed. The chunking logic is kept as a safety net for
-    the legacy upload path.
-
-    Returns the full transcript as a single string.
+      4. For files > 24MB, chunk with pydub and merge segments with cumulative offsets.
     """
     if len(audio_bytes) < 500:
-        return ""
+        return []
 
     size_mb = len(audio_bytes) / (1024 * 1024)
 
@@ -143,34 +188,42 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> str:
         try:
             logger.info("Trying local Whisper at %s (%.1f MB)...", Config.WHISPER_BASE_URL, size_mb)
             start = time.time()
-            text = _transcribe_local(audio_bytes, file_format)
+            segments = _transcribe_local(audio_bytes, file_format)
             elapsed = time.time() - start
-            logger.info("Local Whisper succeeded in %.1fs.", elapsed)
-            return text
+            logger.info("Local Whisper succeeded in %.1fs (%d segments).", elapsed, len(segments))
+            return segments
         except Exception as exc:
             logger.warning("Local Whisper failed (%.1f MB): %s. Falling back to OpenAI.", size_mb, exc)
 
     # --- Fallback: OpenAI Whisper API ---
     logger.info("Using OpenAI Whisper (%.1f MB)...", size_mb)
 
-    # For streaming chunks (< 24 MB), send directly
     if len(audio_bytes) <= WHISPER_MAX_BYTES:
         start = time.time()
-        text = _transcribe_openai(audio_bytes, file_format)
+        segments = _transcribe_openai(audio_bytes, file_format)
         elapsed = time.time() - start
-        logger.info("OpenAI Whisper succeeded in %.1fs.", elapsed)
-        return text
+        logger.info("OpenAI Whisper succeeded in %.1fs (%d segments).", elapsed, len(segments))
+        return segments
 
-    # Legacy path: large file from non-streaming upload — chunk it with pydub
+    # Large file: chunk with pydub, merge segments with cumulative time offset
     logger.info("Audio exceeds 24 MB, using pydub chunking for OpenAI...")
+    from pydub import AudioSegment
     from services.audio_processing import chunk_audio_pydub
 
     chunks = chunk_audio_pydub(audio_bytes, file_format=file_format)
-    transcripts = []
+    all_segments = []
+    cumulative_offset = 0.0
+
     for idx, chunk in enumerate(chunks):
-        logger.info("Transcribing pydub chunk %d / %d (%.1f MB)...", idx + 1, len(chunks), len(chunk) / (1024 * 1024))
-        text = _transcribe_openai(chunk, file_format)
-        transcripts.append(text)
+        logger.info("Transcribing pydub chunk %d / %d (%.1f MB)...",
+                     idx + 1, len(chunks), len(chunk) / (1024 * 1024))
+        segments = _transcribe_openai(chunk, file_format)
+        for seg in segments:
+            seg["start"] = round(seg["start"] + cumulative_offset, 2)
+            seg["end"] = round(seg["end"] + cumulative_offset, 2)
+        all_segments.extend(segments)
 
-    return "\n\n".join(transcripts)
+        chunk_audio_obj = AudioSegment.from_file(io.BytesIO(chunk), format=file_format)
+        cumulative_offset += len(chunk_audio_obj) / 1000.0
 
+    return all_segments

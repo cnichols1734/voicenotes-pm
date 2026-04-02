@@ -181,6 +181,24 @@
             <div class="empty-state-title">No transcript available</div>
             <div class="empty-state-desc">Summary was not generated or the meeting is still processing.</div>
         </div>
+        <!-- Audio mini-player (shown when audio is available) -->
+        <div class="audio-mini-player" id="audio-mini-player" style="display:none">
+            <button class="player-play-pause" id="player-play-pause" title="Play/Pause">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            </button>
+            <span class="player-time" id="player-time-current">0:00</span>
+            <div class="player-progress-bar" id="player-progress-bar">
+                <div class="player-progress-fill" id="player-progress-fill"></div>
+            </div>
+            <span class="player-time" id="player-time-total">0:00</span>
+            <select class="player-speed" id="player-speed" title="Playback speed">
+                <option value="0.75">0.75x</option>
+                <option value="1" selected>1x</option>
+                <option value="1.25">1.25x</option>
+                <option value="1.5">1.5x</option>
+                <option value="2">2x</option>
+            </select>
+        </div>
         <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
             <button class="btn btn-secondary btn-sm" id="copy-transcript-btn">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"

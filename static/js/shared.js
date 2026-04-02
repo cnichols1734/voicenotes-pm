@@ -122,7 +122,7 @@
         lastKnownUpdatedAt = meeting.updated_at || null;
 
         renderSummary(meeting.summary);
-        renderTranscript(meeting.transcript);
+        renderTranscriptOrPlayer(meeting);
 
         startPresencePolling();
         initSharedComments();
@@ -740,6 +740,28 @@
     // ---------------------------------------------------------------------------
     // Transcript
     // ---------------------------------------------------------------------------
+    function renderTranscriptOrPlayer(meeting) {
+        var contentEl = getEl('transcript-content');
+        var emptyEl = getEl('transcript-empty');
+        var segments = meeting.transcript_segments;
+        var audioUrl = meeting.audio_url;
+        var transcript = meeting.transcript;
+
+        if (segments && segments.length && audioUrl && window.TranscriptPlayer) {
+            if (emptyEl) emptyEl.style.display = 'none';
+            window.TranscriptPlayer.init(contentEl, segments, audioUrl);
+        } else if (transcript) {
+            if (contentEl) {
+                contentEl.textContent = transcript;
+                contentEl.style.display = 'block';
+            }
+            if (emptyEl) emptyEl.style.display = 'none';
+        } else {
+            if (contentEl) contentEl.style.display = 'none';
+            if (emptyEl) emptyEl.style.display = 'flex';
+        }
+    }
+
     function renderTranscript(transcript) {
         var contentEl = getEl('transcript-content');
         var emptyEl = getEl('transcript-empty');
@@ -1094,7 +1116,7 @@
             }
 
             renderSummary(meeting.summary);
-            renderTranscript(meeting.transcript);
+            renderTranscriptOrPlayer(meeting);
 
             showUpdateFlash();
         } catch (_) {

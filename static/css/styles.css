@@ -1833,6 +1833,213 @@ mark.search-highlight {
   padding: 24px;
 }
 
+/* When transcript player is active, override some defaults */
+.transcript-content.transcript-player-active {
+  white-space: normal;
+  padding: 0;
+  background: transparent;
+  border: none;
+  position: relative;
+}
+
+/* =====================================================
+   Audio Mini-Player
+   ===================================================== */
+.audio-mini-player {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.player-play-pause {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: var(--primary);
+  color: white;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.player-play-pause:hover {
+  background: var(--primary-hover);
+  transform: scale(1.05);
+}
+
+.player-play-pause:active {
+  transform: scale(0.95);
+}
+
+.player-time {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  min-width: 36px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.player-progress-bar {
+  flex: 1;
+  height: 6px;
+  background: var(--border-subtle);
+  border-radius: 3px;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.player-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 3px;
+  width: 0;
+  transition: width 0.15s linear;
+}
+
+.player-progress-bar:hover .player-progress-fill {
+  background: var(--primary-hover);
+}
+
+.player-speed {
+  font-size: 11px;
+  padding: 3px 4px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* =====================================================
+   Transcript Segments (Player Mode)
+   ===================================================== */
+.transcript-segments-scroll {
+  max-height: 65vh;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  scroll-behavior: smooth;
+}
+
+.transcript-segment {
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+  margin-bottom: 2px;
+  align-items: baseline;
+}
+
+.transcript-segment:hover {
+  background: var(--bg-hover);
+}
+
+.transcript-segment.active {
+  background: rgba(99, 102, 241, 0.10);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.segment-timestamp {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+  min-width: 36px;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.segment-text {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.transcript-segment.active .segment-text {
+  color: var(--text-primary);
+}
+
+.transcript-segment.active .segment-timestamp {
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* Back to playback floating button */
+.back-to-playback {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: sticky;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 8px;
+  padding: 8px 16px;
+  background: var(--primary);
+  color: white;
+  border: none;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  transition: background 0.15s, transform 0.1s;
+  z-index: 5;
+  width: fit-content;
+}
+
+.back-to-playback:hover {
+  background: var(--primary-hover);
+  transform: translateX(-50%) scale(1.03);
+}
+
+/* Upload progress bar in recording overlay */
+.upload-progress-bar {
+  width: 100%;
+  margin-top: 12px;
+  height: 6px;
+  border-radius: 3px;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.upload-progress-bar::-webkit-progress-bar {
+  background: var(--border-subtle);
+  border-radius: 3px;
+}
+
+.upload-progress-bar::-webkit-progress-value {
+  background: var(--primary);
+  border-radius: 3px;
+  transition: width 0.2s ease;
+}
+
+.upload-progress-text {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin-top: 6px;
+  text-align: center;
+}
+
 /* =====================================================
    Tabs
    ===================================================== */

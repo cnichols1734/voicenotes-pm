@@ -99,7 +99,8 @@
     <div class="overlay-state" id="state-processing">
         <div class="spinner"></div>
         <h2 style="font-size:24px;font-weight:700;">Finalizing transcript...</h2>
-        <p class="text-secondary">Saving your meeting. Almost done!</p>
+        <p class="text-secondary" id="upload-progress-text">Saving your meeting. Almost done!</p>
+        <progress class="upload-progress-bar" id="upload-progress" max="100" value="0" style="display:none;"></progress>
     </div>
 
     <!-- State 3: Meeting Type Selection -->
