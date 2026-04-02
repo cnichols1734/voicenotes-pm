@@ -1986,26 +1986,25 @@ mark.search-highlight {
 .player-progress-fill::after {
   content: '';
   position: absolute;
-  right: -5px;
+  right: -6px;
   top: 50%;
-  transform: translateY(-50%) scale(0);
-  width: 10px;
-  height: 10px;
+  transform: translateY(-50%);
+  width: 12px;
+  height: 12px;
   background: var(--primary);
   border-radius: 50%;
   box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
-  transition: transform 0.15s ease;
+  transition: width 0.1s ease, height 0.1s ease;
 }
 
 .player-progress-bar:hover .player-progress-fill::after {
-  transform: translateY(-50%) scale(1);
-}
-
-.player-progress-bar:hover .player-progress-fill {
+  width: 14px;
+  height: 14px;
+  right: -7px;
   background: var(--primary-hover);
 }
 
-.player-progress-bar:hover .player-progress-fill::after {
+.player-progress-bar:hover .player-progress-fill {
   background: var(--primary-hover);
 }
 
