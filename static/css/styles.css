@@ -1843,6 +1843,78 @@ mark.search-highlight {
 }
 
 /* =====================================================
+   Transcript Search Bar
+   ===================================================== */
+.transcript-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  margin-bottom: 8px;
+}
+
+.transcript-search-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  min-width: 0;
+}
+
+.transcript-search-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.transcript-search-count {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  min-width: 40px;
+  text-align: center;
+}
+
+.transcript-search-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.1s;
+}
+
+.transcript-search-nav:hover {
+  background: var(--bg-hover);
+}
+
+/* Search match highlighting */
+.transcript-segment.search-match {
+  background: rgba(250, 204, 21, 0.08);
+}
+
+.transcript-segment.search-focus {
+  background: rgba(250, 204, 21, 0.18);
+  box-shadow: inset 3px 0 0 #facc15;
+}
+
+.transcript-highlight {
+  background: rgba(250, 204, 21, 0.35);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* =====================================================
    Audio Mini-Player
    ===================================================== */
 .audio-mini-player {
@@ -1907,7 +1979,6 @@ mark.search-highlight {
   background: var(--primary);
   border-radius: 3px;
   width: 0;
-  transition: width 0.15s linear;
 }
 
 .player-progress-bar:hover .player-progress-fill {
