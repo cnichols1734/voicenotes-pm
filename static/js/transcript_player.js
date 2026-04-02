@@ -384,11 +384,11 @@ window.TranscriptPlayer = (() => {
             }
         });
 
-        updateSearchCount();
         if (searchMatches.length > 0) {
             currentMatchIdx = 0;
             scrollToMatch(0);
         }
+        updateSearchCount();
     }
 
     function navigateSearch(direction) {
