@@ -158,6 +158,14 @@ window.TranscriptPlayer = (() => {
         audio = new Audio(audioUrl);
         audio.preload = 'auto';
 
+        // #region agent log
+        audio.addEventListener('loadedmetadata', () => { fetch('http://127.0.0.1:7536/ingest/1f6990e5-0d9c-41d5-8d17-473da87fda65',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4f20df'},body:JSON.stringify({sessionId:'4f20df',location:'transcript_player.js:init-loadedmetadata',message:'Audio metadata loaded',data:{duration:audio.duration,src:audio.src.substring(0,120),seekable_length:audio.seekable.length,seekable_end:audio.seekable.length>0?audio.seekable.end(audio.seekable.length-1):0,segments_count:segments.length,last_segment_end:segments.length>0?segments[segments.length-1].end:0},timestamp:Date.now(),hypothesisId:'H-C'})}).catch(()=>{}); });
+        // #endregion
+
+        // #region agent log
+        audio.addEventListener('error', () => { fetch('http://127.0.0.1:7536/ingest/1f6990e5-0d9c-41d5-8d17-473da87fda65',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4f20df'},body:JSON.stringify({sessionId:'4f20df',location:'transcript_player.js:audio-error',message:'Audio element error',data:{error_code:audio.error?audio.error.code:null,error_msg:audio.error?audio.error.message:'none',src:audio.src.substring(0,120)},timestamp:Date.now(),hypothesisId:'H-A'})}).catch(()=>{}); });
+        // #endregion
+
         // Bind all event handlers (stored for clean removal)
         boundOnTimeUpdate = onTimeUpdate;
         boundOnEnded = onEnded;
@@ -176,13 +184,25 @@ window.TranscriptPlayer = (() => {
         const seg = segments[idx];
         if (!seg) return;
 
+        // #region agent log
+        const beforeTime = audio.currentTime;
+        const dur = audio.duration;
+        // #endregion
+
         audio.currentTime = seg.start;
         setActiveSegment(idx);
         updateProgressBar();
         userScrolledAway = false;
         hideBackToPlayback();
 
+        // #region agent log
+        fetch('http://127.0.0.1:7536/ingest/1f6990e5-0d9c-41d5-8d17-473da87fda65',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4f20df'},body:JSON.stringify({sessionId:'4f20df',location:'transcript_player.js:onSegmentClick',message:'Segment clicked',data:{idx:idx,seg_start:seg.start,seg_end:seg.end,seg_text:seg.text.substring(0,60),audio_duration:dur,before_currentTime:beforeTime,after_currentTime:audio.currentTime,paused:audio.paused,readyState:audio.readyState,seekable_length:audio.seekable.length,seekable_end:audio.seekable.length>0?audio.seekable.end(audio.seekable.length-1):0,buffered_length:audio.buffered.length,buffered_end:audio.buffered.length>0?audio.buffered.end(audio.buffered.length-1):0},timestamp:Date.now(),hypothesisId:'H-D'})}).catch(()=>{});
+        // #endregion
+
         audio.play().catch((err) => {
+            // #region agent log
+            fetch('http://127.0.0.1:7536/ingest/1f6990e5-0d9c-41d5-8d17-473da87fda65',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4f20df'},body:JSON.stringify({sessionId:'4f20df',location:'transcript_player.js:play-failed',message:'audio.play() rejected',data:{error:err.message,idx:idx,seg_start:seg.start},timestamp:Date.now(),hypothesisId:'H-D'})}).catch(()=>{});
+            // #endregion
             console.warn('Playback failed:', err);
         });
     }
