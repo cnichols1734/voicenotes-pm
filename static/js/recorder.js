@@ -377,9 +377,6 @@ window.RecorderModule = (() => {
             const mimeType = getMimeType();
             const audioBlob = new Blob(allRecordedBlobs, { type: mimeType });
 
-            // #region agent log
-            console.log('[DEBUG-4f20df] Final audio blob:', {size_mb: (audioBlob.size/(1024*1024)).toFixed(2), blob_count: allRecordedBlobs.length, mime: mimeType, elapsed: elapsedSeconds, segments: timedSegments.length});
-            // #endregion
 
             const formData = new FormData();
             formData.append('transcript', fullTranscript);
