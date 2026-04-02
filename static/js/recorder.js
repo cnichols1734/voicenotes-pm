@@ -399,7 +399,7 @@ window.RecorderModule = (() => {
             const audioBlob = new Blob(allRecordedBlobs, { type: mimeType });
 
             // #region agent log
-            fetch('http://127.0.0.1:7536/ingest/1f6990e5-0d9c-41d5-8d17-473da87fda65',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4f20df'},body:JSON.stringify({sessionId:'4f20df',location:'recorder.js:createMeeting',message:'Final audio blob assembled',data:{blob_size_mb:(audioBlob.size/(1024*1024)).toFixed(2),blob_count:allRecordedBlobs.length,mime:mimeType,elapsed:elapsedSeconds,segments_count:timedSegments.length},timestamp:Date.now(),hypothesisId:'H-E'})}).catch(()=>{});
+            console.log('[DEBUG-4f20df] Final audio blob:', {size_mb: (audioBlob.size/(1024*1024)).toFixed(2), blob_count: allRecordedBlobs.length, mime: mimeType, elapsed: elapsedSeconds, segments: timedSegments.length});
             // #endregion
 
             const formData = new FormData();

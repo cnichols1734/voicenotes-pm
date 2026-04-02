@@ -158,12 +158,22 @@ window.TranscriptPlayer = (() => {
         audio = new Audio(audioUrl);
         audio.preload = 'auto';
 
-        // #region agent log
-        audio.addEventListener('loadedmetadata', () => { fetch('http://127.0.0.1:7536/ingest/1f6990e5-0d9c-41d5-8d17-473da87fda65',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4f20df'},body:JSON.stringify({sessionId:'4f20df',location:'transcript_player.js:init-loadedmetadata',message:'Audio metadata loaded',data:{duration:audio.duration,src:audio.src.substring(0,120),seekable_length:audio.seekable.length,seekable_end:audio.seekable.length>0?audio.seekable.end(audio.seekable.length-1):0,segments_count:segments.length,last_segment_end:segments.length>0?segments[segments.length-1].end:0},timestamp:Date.now(),hypothesisId:'H-C'})}).catch(()=>{}); });
-        // #endregion
-
-        // #region agent log
-        audio.addEventListener('error', () => { fetch('http://127.0.0.1:7536/ingest/1f6990e5-0d9c-41d5-8d17-473da87fda65',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4f20df'},body:JSON.stringify({sessionId:'4f20df',location:'transcript_player.js:audio-error',message:'Audio element error',data:{error_code:audio.error?audio.error.code:null,error_msg:audio.error?audio.error.message:'none',src:audio.src.substring(0,120)},timestamp:Date.now(),hypothesisId:'H-A'})}).catch(()=>{}); });
+        // #region agent log — visible debug banner (temporary)
+        var _dbg = document.createElement('div');
+        _dbg.id = 'tp-debug-banner';
+        _dbg.style.cssText = 'background:#1a1a2e;color:#0f0;font:11px/1.4 monospace;padding:8px 12px;border-radius:6px;margin-bottom:8px;white-space:pre-wrap;max-height:120px;overflow-y:auto;border:1px solid #333;';
+        _dbg.textContent = 'DEBUG: loading audio...';
+        container.insertBefore(_dbg, container.firstChild);
+        audio.addEventListener('loadedmetadata', function() {
+            _dbg.textContent = 'AUDIO LOADED\n'
+                + 'duration: ' + audio.duration.toFixed(2) + 's (' + formatTime(audio.duration) + ')\n'
+                + 'seekable ranges: ' + audio.seekable.length + (audio.seekable.length > 0 ? ' [0 - ' + audio.seekable.end(audio.seekable.length-1).toFixed(2) + 's]' : '') + '\n'
+                + 'src: ...' + audio.src.slice(-80) + '\n'
+                + 'segments: ' + segments.length + ', last ends at: ' + (segments.length > 0 ? segments[segments.length-1].end.toFixed(2) + 's' : 'n/a');
+        });
+        audio.addEventListener('error', function() {
+            _dbg.textContent = 'AUDIO ERROR: code=' + (audio.error ? audio.error.code : '?') + ' msg=' + (audio.error ? audio.error.message : 'unknown');
+        });
         // #endregion
 
         // Bind all event handlers (stored for clean removal)
@@ -184,24 +194,26 @@ window.TranscriptPlayer = (() => {
         const seg = segments[idx];
         if (!seg) return;
 
-        // #region agent log
-        const beforeTime = audio.currentTime;
-        const dur = audio.duration;
-        // #endregion
-
         audio.currentTime = seg.start;
         setActiveSegment(idx);
         updateProgressBar();
         userScrolledAway = false;
         hideBackToPlayback();
 
-        // #region agent log
-        fetch('http://127.0.0.1:7536/ingest/1f6990e5-0d9c-41d5-8d17-473da87fda65',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4f20df'},body:JSON.stringify({sessionId:'4f20df',location:'transcript_player.js:onSegmentClick',message:'Segment clicked',data:{idx:idx,seg_start:seg.start,seg_end:seg.end,seg_text:seg.text.substring(0,60),audio_duration:dur,before_currentTime:beforeTime,after_currentTime:audio.currentTime,paused:audio.paused,readyState:audio.readyState,seekable_length:audio.seekable.length,seekable_end:audio.seekable.length>0?audio.seekable.end(audio.seekable.length-1):0,buffered_length:audio.buffered.length,buffered_end:audio.buffered.length>0?audio.buffered.end(audio.buffered.length-1):0},timestamp:Date.now(),hypothesisId:'H-D'})}).catch(()=>{});
+        // #region agent log — update debug banner on click
+        var _dbg2 = document.getElementById('tp-debug-banner');
+        if (_dbg2) {
+            _dbg2.textContent += '\n---CLICK seg[' + idx + '] start=' + seg.start.toFixed(2)
+                + ' → currentTime=' + audio.currentTime.toFixed(2)
+                + ' duration=' + (audio.duration||0).toFixed(2)
+                + ' seekable=' + (audio.seekable.length > 0 ? audio.seekable.end(audio.seekable.length-1).toFixed(2) : '0')
+                + ' buffered=' + (audio.buffered.length > 0 ? audio.buffered.end(audio.buffered.length-1).toFixed(2) : '0');
+        }
         // #endregion
 
         audio.play().catch((err) => {
             // #region agent log
-            fetch('http://127.0.0.1:7536/ingest/1f6990e5-0d9c-41d5-8d17-473da87fda65',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'4f20df'},body:JSON.stringify({sessionId:'4f20df',location:'transcript_player.js:play-failed',message:'audio.play() rejected',data:{error:err.message,idx:idx,seg_start:seg.start},timestamp:Date.now(),hypothesisId:'H-D'})}).catch(()=>{});
+            if (_dbg2) _dbg2.textContent += '\nPLAY FAILED: ' + err.message;
             // #endregion
             console.warn('Playback failed:', err);
         });
