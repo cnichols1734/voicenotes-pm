@@ -8,6 +8,7 @@ Supports two backends:
 Returns segment-level timestamped data (list of dicts with start/end/text)
 for synchronized transcript playback.
 """
+import gc
 import io
 import logging
 import re
@@ -278,6 +279,8 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> list:
     from services.audio_processing import chunk_audio_pydub
 
     chunks = chunk_audio_pydub(audio_bytes, file_format=file_format)
+    del audio_bytes
+
     all_segments = []
     cumulative_offset = 0.0
 
@@ -292,5 +295,9 @@ def transcribe_audio(audio_bytes: bytes, file_format: str = "webm") -> list:
 
         chunk_audio_obj = AudioSegment.from_file(io.BytesIO(chunk), format=file_format)
         cumulative_offset += len(chunk_audio_obj) / 1000.0
+        del chunk_audio_obj
+
+    del chunks
+    gc.collect()
 
     return _filter_hallucinations(all_segments, language)

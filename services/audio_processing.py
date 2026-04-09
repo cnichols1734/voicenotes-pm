@@ -8,6 +8,7 @@ Strategy:
   2. Fallback: use pydub/ffmpeg to re-encode proper segments if the
      raw split fails during transcription.
 """
+import gc
 import io
 import logging
 import math
@@ -105,6 +106,10 @@ def chunk_audio_pydub(
         segment.export(buf, format=file_format)
         chunks.append(buf.getvalue())
         logger.info("Chunk %d: %.1f MB", i + 1, len(chunks[-1]) / (1024 * 1024))
+        del segment, buf
+
+    del audio
+    gc.collect()
 
     return chunks
 
