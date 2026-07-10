@@ -154,6 +154,8 @@ def create_audio_upload_url(user_id: str, meeting_id: str, mime_type: str) -> di
     Create a short-lived signed upload URL so the browser can PUT/POST audio
     directly to Supabase Storage — bypassing Railway's 5-minute HTTP timeout.
     """
+    from config import Config
+
     _ensure_bucket()
     source_fmt = _source_format_from_mime(mime_type)
     ext = source_fmt if source_fmt in _SEEKABLE_FORMATS else (
@@ -169,13 +171,37 @@ def create_audio_upload_url(user_id: str, meeting_id: str, mime_type: str) -> di
 
     sb = get_supabase()
     signed = sb.storage.from_(BUCKET_NAME).create_signed_upload_url(object_path)
+    token = signed.get("token") or ""
+    if not token:
+        raise RuntimeError("Supabase did not return an upload token")
+
+    # Rebuild the URL ourselves — storage3 can concatenate base_url + path without
+    # a slash (…/storage/v1 + object/… → …/storage/v1object/…), which breaks browsers.
+    signed_url = (
+        f"{Config.SUPABASE_URL.rstrip('/')}/storage/v1/object/upload/sign/"
+        f"{BUCKET_NAME}/{object_path}?token={token}"
+    )
+
+    logger.info("Created signed upload URL for %s", object_path)
     return {
         "path": object_path,
-        "token": signed["token"],
-        "signed_url": signed.get("signed_url") or signed.get("signedUrl"),
+        "token": token,
+        "signed_url": signed_url,
         "bucket": BUCKET_NAME,
         "content_type": mime_type,
     }
+
+
+def upload_audio_bytes(object_path: str, audio_bytes: bytes, mime_type: str) -> str:
+    """Upload raw bytes to an exact storage path (used by chunked reassembly)."""
+    _ensure_bucket()
+    sb = get_supabase()
+    sb.storage.from_(BUCKET_NAME).upload(
+        path=object_path,
+        file=audio_bytes,
+        file_options={"content-type": mime_type, "upsert": "true"},
+    )
+    return object_path
 
 
 def download_audio(audio_path: str) -> bytes:

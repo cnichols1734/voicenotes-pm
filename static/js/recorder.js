@@ -530,7 +530,12 @@ window.RecorderModule = (() => {
                 if (xhr.status >= 200 && xhr.status < 300) {
                     resolve({ status: xhr.status, data });
                 } else {
-                    reject(new Error(data.error || data.message || `Request failed (${xhr.status})`));
+                    const detail = data.error
+                        || data.message
+                        || data.statusCode
+                        || (typeof data.raw === 'string' ? data.raw.slice(0, 160) : '')
+                        || `Request failed (${xhr.status})`;
+                    reject(new Error(detail));
                 }
             };
             xhr.onerror = () => reject(new Error('Upload failed — network error'));
@@ -590,29 +595,18 @@ window.RecorderModule = (() => {
             throw new Error('Server did not return a valid upload URL');
         }
 
-        // Direct to Supabase Storage — bypasses Railway's 5-minute HTTP limit.
-        // Matches storage3 upload_to_signed_url: PUT multipart with file field.
+        // Match supabase-js uploadToSignedUrl: FormData with empty field name + cacheControl
         const formData = new FormData();
         const filename = uploadInfo.path.split('/').pop() || 'recording.webm';
         formData.append('cacheControl', '3600');
-        formData.append('file', audioBlob, filename);
+        formData.append('', audioBlob, filename);
 
-        let signedUrl = uploadInfo.signed_url;
-        // Prefer direct storage hostname for large uploads when available
-        try {
-            const u = new URL(signedUrl);
-            if (u.hostname.endsWith('.supabase.co') && !u.hostname.includes('.storage.')) {
-                const ref = u.hostname.split('.')[0];
-                u.hostname = `${ref}.storage.supabase.co`;
-                signedUrl = u.toString();
-            }
-        } catch (e) { /* keep original URL */ }
-
+        // Use the project URL as returned (do NOT rewrite to *.storage.supabase.co —
+        // that hostname often fails CORS from custom domains like voicenotez.com).
         setUploadProgress(15, 'Uploading audio to storage...');
-        await xhrSend(signedUrl, {
+        await xhrSend(uploadInfo.signed_url, {
             method: 'PUT',
             body: formData,
-            // No Content-Type header — browser sets multipart boundary
             timeout: 30 * 60 * 1000,
             onProgress: (loaded, total) => {
                 const pct = 15 + Math.round((loaded / total) * 75);
@@ -633,6 +627,54 @@ window.RecorderModule = (() => {
             timeout: 60000,
         });
         setUploadProgress(100, 'Upload complete');
+    }
+
+    async function uploadAudioChunkedViaApp(meetingId, audioBlob, mimeType) {
+        // Fallback when browser→Supabase direct upload fails (CORS/network).
+        // ~2 MB chunks stay under Railway's 5-minute request timeout.
+        const CHUNK_SIZE = 2 * 1024 * 1024;
+        const total = Math.max(1, Math.ceil(audioBlob.size / CHUNK_SIZE));
+
+        for (let index = 0; index < total; index++) {
+            const start = index * CHUNK_SIZE;
+            const end = Math.min(audioBlob.size, start + CHUNK_SIZE);
+            const slice = audioBlob.slice(start, end);
+
+            const formData = new FormData();
+            formData.append('chunk', slice, `chunk-${index}.bin`);
+            formData.append('index', String(index));
+            formData.append('total', String(total));
+            formData.append('format', 'webm');
+            formData.append('mime_type', mimeType);
+
+            const pctBase = 15 + Math.round((index / total) * 75);
+            setUploadProgress(
+                pctBase,
+                `Uploading audio (chunk ${index + 1}/${total})...`,
+            );
+
+            await xhrSend(`/api/recordings/${meetingId}/audio-chunk`, {
+                method: 'POST',
+                body: formData,
+                timeout: 4 * 60 * 1000,
+                onProgress: (loaded, totalBytes) => {
+                    const chunkPct = loaded / Math.max(totalBytes, 1);
+                    const pct = 15 + Math.round(((index + chunkPct) / total) * 75);
+                    setUploadProgress(pct, `Uploading audio (chunk ${index + 1}/${total})...`);
+                },
+            });
+        }
+        setUploadProgress(100, 'Upload complete');
+    }
+
+    async function uploadAudioWithFallback(meetingId, audioBlob, mimeType) {
+        try {
+            await uploadAudioDirectToStorage(meetingId, audioBlob, mimeType);
+        } catch (directErr) {
+            console.warn('Direct Supabase upload failed, falling back to chunked upload:', directErr);
+            setUploadProgress(12, 'Direct upload blocked — switching to chunked upload...');
+            await uploadAudioChunkedViaApp(meetingId, audioBlob, mimeType);
+        }
     }
 
     function startTitleGeneration(meetingId) {
@@ -702,10 +744,10 @@ window.RecorderModule = (() => {
                 currentTranscript = fullTranscript;
             }
 
-            // 2) Large audio goes straight to Supabase (not through Railway)
+            // 2) Large audio: try direct Supabase, fall back to chunked via app
             if (hasAudio) {
                 try {
-                    await uploadAudioDirectToStorage(currentMeetingId, audioBlob, mimeType);
+                    await uploadAudioWithFallback(currentMeetingId, audioBlob, mimeType);
                 } catch (audioErr) {
                     // Meeting + transcript are already saved — don't lose that.
                     console.error('Direct audio upload failed:', audioErr);

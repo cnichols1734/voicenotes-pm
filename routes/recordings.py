@@ -16,7 +16,7 @@ from services.whisper_service import transcribe_audio, segments_to_text
 from services.summarizer_service import summarize_transcript
 from services.storage_service import (
     upload_audio_raw, optimize_audio_to_mp3, get_signed_url, delete_audio,
-    create_audio_upload_url, download_audio,
+    create_audio_upload_url, download_audio, upload_audio_bytes,
 )
 from services.title_service import generate_title
 from services.action_items import (
@@ -411,6 +411,111 @@ def complete_meeting_audio_upload(meeting_id):
         "audio_stored": True,
         "audio_path": audio_path,
     })
+
+
+# ---------------------------------------------------------------------------
+# POST /api/recordings/<meeting_id>/audio-chunk
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/audio-chunk", methods=["POST"])
+@login_required
+def upload_meeting_audio_chunk(meeting_id):
+    """
+    Accept a small audio slice (~2 MB). Used when direct-to-Supabase upload
+    fails (CORS/network). Each request stays well under Railway's 5-min limit.
+    Chunks are staged in storage, then assembled on the final chunk.
+    """
+    try:
+        uuid.UUID(str(meeting_id))
+    except ValueError:
+        return jsonify({"error": "Invalid meeting_id"}), 400
+
+    if "chunk" not in request.files:
+        return jsonify({"error": "No chunk file provided"}), 400
+
+    try:
+        index = int(request.form.get("index", "-1"))
+        total = int(request.form.get("total", "-1"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "index and total must be integers"}), 400
+
+    if index < 0 or total < 1 or index >= total:
+        return jsonify({"error": "Invalid chunk index/total"}), 400
+
+    file_format = request.form.get("format", "webm")
+    mime_type = request.form.get("mime_type") or f"audio/{file_format}"
+    chunk_bytes = request.files["chunk"].read()
+    if not chunk_bytes:
+        return jsonify({"error": "Empty chunk"}), 400
+    if len(chunk_bytes) > 8 * 1024 * 1024:
+        return jsonify({"error": "Chunk too large (max 8 MB)"}), 413
+
+    user_id = str(current_user.id)
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("meetings")
+            .select("id")
+            .eq("id", meeting_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
+        if not result.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        part_path = f"{user_id}/{meeting_id}.part{index:05d}"
+        upload_audio_bytes(part_path, chunk_bytes, "application/octet-stream")
+    except Exception as exc:
+        logger.error("Chunk upload failed for meeting %s idx=%s: %s", meeting_id, index, exc)
+        return _supabase_error(f"Chunk upload failed: {exc}")
+
+    # Not the last chunk — acknowledge and return
+    if index < total - 1:
+        return jsonify({"ok": True, "index": index, "total": total})
+
+    # Last chunk: assemble all parts into the final object
+    try:
+        parts = []
+        for i in range(total):
+            part_path = f"{user_id}/{meeting_id}.part{i:05d}"
+            parts.append(download_audio(part_path))
+
+        audio_bytes = b"".join(parts)
+        if len(audio_bytes) > MAX_AUDIO_BYTES:
+            return jsonify({"error": "Assembled audio exceeds 100 MB limit."}), 413
+
+        ext = "webm" if "webm" in mime_type else file_format
+        final_path = f"{user_id}/{meeting_id}.{ext}"
+        upload_audio_bytes(final_path, audio_bytes, mime_type)
+
+        supabase.table("meetings").update({
+            "audio_path": final_path,
+            "audio_mime_type": mime_type,
+        }).eq("id", meeting_id).eq("user_id", user_id).execute()
+
+        # Cleanup staged parts (best-effort)
+        for i in range(total):
+            try:
+                delete_audio(f"{user_id}/{meeting_id}.part{i:05d}")
+            except Exception:
+                pass
+
+        threading.Thread(
+            target=_optimize_stored_audio_background,
+            args=(user_id, meeting_id, final_path, mime_type),
+            daemon=True,
+            name=f"audio-opt-{meeting_id[:8]}",
+        ).start()
+
+        return jsonify({
+            "ok": True,
+            "complete": True,
+            "meeting_id": meeting_id,
+            "audio_path": final_path,
+            "audio_stored": True,
+        })
+    except Exception as exc:
+        logger.error("Failed to assemble audio chunks for %s: %s", meeting_id, exc)
+        return _supabase_error(f"Failed to assemble audio: {exc}")
 
 
 # ---------------------------------------------------------------------------
