@@ -45,6 +45,18 @@
         </select>
     </div>
 
+    <div class="pending-draft-banner" id="pending-draft-banner" style="display:none;" role="status">
+        <div class="pending-draft-banner-text">
+            <strong>Unsaved recording found</strong>
+            <span id="pending-draft-meta"></span>
+        </div>
+        <div class="pending-draft-banner-actions">
+            <button class="btn btn-primary" id="resume-draft-btn">Retry Upload</button>
+            <button class="btn btn-secondary" id="download-draft-btn">Download</button>
+            <button class="btn btn-secondary" id="discard-draft-btn">Discard</button>
+        </div>
+    </div>
+
     <div class="meetings-list" id="meetings-list">
         <!-- Meeting cards rendered by JS -->
         <div class="empty-state" id="meetings-empty" style="display:none;">
@@ -97,10 +109,21 @@
 
     <!-- State 2: Processing / Finalizing -->
     <div class="overlay-state" id="state-processing">
-        <div class="spinner"></div>
-        <h2 style="font-size:24px;font-weight:700;">Finalizing transcript...</h2>
+        <div class="spinner" id="processing-spinner"></div>
+        <h2 style="font-size:24px;font-weight:700;" id="processing-title">Finalizing transcript...</h2>
         <p class="text-secondary" id="upload-progress-text">Saving your meeting. Almost done!</p>
         <progress class="upload-progress-bar" id="upload-progress" max="100" value="0" style="display:none;"></progress>
+        <div class="upload-fail-actions" id="upload-fail-actions" style="display:none;">
+            <p class="upload-fail-detail" id="upload-fail-detail"></p>
+            <div class="upload-fail-buttons">
+                <button class="btn btn-primary btn-lg" id="retry-upload-btn">Retry Upload</button>
+                <button class="btn btn-secondary" id="download-recording-btn">Download Recording</button>
+                <button class="btn btn-secondary" id="dismiss-failed-upload-btn">Keep &amp; Close</button>
+            </div>
+            <p class="text-secondary" style="font-size:13px;margin-top:12px;max-width:360px;">
+                Your recording is saved on this device. You can retry now or come back later from the dashboard.
+            </p>
+        </div>
     </div>
 
     <!-- State 3: Meeting Type Selection -->

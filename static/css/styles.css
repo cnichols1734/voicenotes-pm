@@ -2116,8 +2116,62 @@ mark.search-highlight {
 }
 
 /* Upload progress bar in recording overlay */
-.upload-progress-bar {
-  width: 100%;
+.upload-fail-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  max-width: 420px;
+}
+
+.upload-fail-detail {
+  color: var(--accent-danger);
+  font-size: 14px;
+  margin: 0 0 8px;
+  max-width: 360px;
+}
+
+.upload-fail-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.pending-draft-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(255, 159, 10, 0.35);
+  background: rgba(255, 159, 10, 0.1);
+  border-radius: 10px;
+}
+
+.pending-draft-banner-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.pending-draft-banner-text span {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.pending-draft-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.upload-progress-bar {  width: 100%;
   margin-top: 12px;
   height: 6px;
   border-radius: 3px;
