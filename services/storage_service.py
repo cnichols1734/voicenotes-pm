@@ -149,6 +149,41 @@ def _source_format_from_mime(mime_type: str) -> str:
     return "webm"
 
 
+def create_audio_upload_url(user_id: str, meeting_id: str, mime_type: str) -> dict:
+    """
+    Create a short-lived signed upload URL so the browser can PUT/POST audio
+    directly to Supabase Storage — bypassing Railway's 5-minute HTTP timeout.
+    """
+    _ensure_bucket()
+    source_fmt = _source_format_from_mime(mime_type)
+    ext = source_fmt if source_fmt in _SEEKABLE_FORMATS else (
+        "webm" if "webm" in mime_type else source_fmt
+    )
+    object_path = f"{user_id}/{meeting_id}.{ext}"
+
+    # Remove any previous object so signed upload isn't blocked by "already exists"
+    try:
+        delete_audio(object_path)
+    except Exception:
+        pass
+
+    sb = get_supabase()
+    signed = sb.storage.from_(BUCKET_NAME).create_signed_upload_url(object_path)
+    return {
+        "path": object_path,
+        "token": signed["token"],
+        "signed_url": signed.get("signed_url") or signed.get("signedUrl"),
+        "bucket": BUCKET_NAME,
+        "content_type": mime_type,
+    }
+
+
+def download_audio(audio_path: str) -> bytes:
+    """Download an object from the meeting-audio bucket."""
+    sb = get_supabase()
+    return sb.storage.from_(BUCKET_NAME).download(audio_path)
+
+
 def upload_audio_raw(user_id: str, meeting_id: str, audio_bytes: bytes, mime_type: str) -> str:
     """
     Upload audio as-is (no remux/transcode). Fast path for the HTTP request

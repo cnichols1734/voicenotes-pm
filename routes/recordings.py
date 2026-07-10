@@ -16,6 +16,7 @@ from services.whisper_service import transcribe_audio, segments_to_text
 from services.summarizer_service import summarize_transcript
 from services.storage_service import (
     upload_audio_raw, optimize_audio_to_mp3, get_signed_url, delete_audio,
+    create_audio_upload_url, download_audio,
 )
 from services.title_service import generate_title
 from services.action_items import (
@@ -51,6 +52,17 @@ def _optimize_audio_background(user_id: str, meeting_id: str, audio_bytes: bytes
         logger.info("Background MP3 optimization complete for meeting %s", meeting_id)
     except Exception as exc:
         logger.error("Background MP3 optimization failed for meeting %s: %s", meeting_id, exc)
+
+
+def _optimize_stored_audio_background(user_id: str, meeting_id: str, audio_path: str, mime_type: str):
+    """Download raw audio from storage, then optimize to MP3 in the background."""
+    try:
+        audio_bytes = download_audio(audio_path)
+        _optimize_audio_background(user_id, meeting_id, audio_bytes, mime_type)
+    except Exception as exc:
+        logger.error(
+            "Failed to load stored audio for optimization (%s): %s", meeting_id, exc,
+        )
 
 
 def _persist_audio_fast(user_id: str, meeting_id: str, audio_bytes: bytes, mime_type: str) -> bool:
@@ -297,15 +309,119 @@ def upload_recording():
 
 
 # ---------------------------------------------------------------------------
+# POST /api/recordings/<meeting_id>/audio-upload-url
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/audio-upload-url", methods=["POST"])
+@login_required
+def create_meeting_audio_upload_url(meeting_id):
+    """
+    Return a signed Supabase Storage upload URL so the browser can send audio
+    directly to storage (avoids Railway's ~5 minute HTTP request timeout).
+    """
+    try:
+        uuid.UUID(str(meeting_id))
+    except ValueError:
+        return jsonify({"error": "Invalid meeting_id"}), 400
+
+    data = request.get_json(force=True, silent=True) or {}
+    mime_type = (data.get("mime_type") or "audio/webm").strip() or "audio/webm"
+
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("meetings")
+            .select("id")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .execute()
+        )
+        if not result.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        upload = create_audio_upload_url(str(current_user.id), meeting_id, mime_type)
+        return jsonify({
+            "meeting_id": meeting_id,
+            "path": upload["path"],
+            "token": upload["token"],
+            "signed_url": upload["signed_url"],
+            "bucket": upload["bucket"],
+            "content_type": upload["content_type"],
+        })
+    except Exception as exc:
+        logger.error("Failed to create audio upload URL for %s: %s", meeting_id, exc)
+        return _supabase_error(f"Failed to create upload URL: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# POST /api/recordings/<meeting_id>/audio-complete
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/audio-complete", methods=["POST"])
+@login_required
+def complete_meeting_audio_upload(meeting_id):
+    """
+    Mark audio as stored after a successful direct-to-Supabase upload,
+    then kick off background MP3 optimization.
+    """
+    try:
+        uuid.UUID(str(meeting_id))
+    except ValueError:
+        return jsonify({"error": "Invalid meeting_id"}), 400
+
+    data = request.get_json(force=True, silent=True) or {}
+    audio_path = (data.get("path") or "").strip()
+    mime_type = (data.get("mime_type") or "audio/webm").strip() or "audio/webm"
+
+    if not audio_path:
+        return jsonify({"error": "path is required"}), 400
+
+    # Path must belong to this user/meeting (prevent arbitrary path writes)
+    expected_prefix = f"{current_user.id}/{meeting_id}."
+    if not audio_path.startswith(expected_prefix):
+        return jsonify({"error": "Invalid audio path"}), 400
+
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("meetings")
+            .select("id")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .execute()
+        )
+        if not result.data:
+            return jsonify({"error": "Meeting not found"}), 404
+
+        supabase.table("meetings").update({
+            "audio_path": audio_path,
+            "audio_mime_type": mime_type,
+        }).eq("id", meeting_id).eq("user_id", str(current_user.id)).execute()
+    except Exception as exc:
+        logger.error("Failed to finalize audio for meeting %s: %s", meeting_id, exc)
+        return _supabase_error(f"Failed to finalize audio: {exc}")
+
+    threading.Thread(
+        target=_optimize_stored_audio_background,
+        args=(str(current_user.id), meeting_id, audio_path, mime_type),
+        daemon=True,
+        name=f"audio-opt-{meeting_id[:8]}",
+    ).start()
+
+    return jsonify({
+        "meeting_id": meeting_id,
+        "audio_stored": True,
+        "audio_path": audio_path,
+    })
+
+
+# ---------------------------------------------------------------------------
 # POST /api/recordings/<meeting_id>/audio
 # ---------------------------------------------------------------------------
 @recordings_bp.route("/<meeting_id>/audio", methods=["POST"])
 @login_required
 def upload_meeting_audio(meeting_id):
     """
-    Attach or re-upload audio for an existing meeting.
-    Used when the initial upload saved the transcript but audio storage failed,
-    or when the client retries after a network error.
+    Attach or re-upload audio for an existing meeting (proxy fallback).
+    Prefer /audio-upload-url + direct Supabase upload for large files.
     """
     try:
         uuid.UUID(str(meeting_id))

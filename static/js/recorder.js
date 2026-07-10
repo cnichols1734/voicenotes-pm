@@ -508,82 +508,165 @@ window.RecorderModule = (() => {
     // ---------------------------------------------------------------------------
     // Upload with progress tracking
     // ---------------------------------------------------------------------------
-    function uploadWithProgress(formData, url = '/api/recordings/upload') {
+    function xhrSend(url, { method = 'POST', body = null, headers = {}, timeout = 120000, onProgress = null } = {}) {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
-            xhr.open('POST', url);
-            // Long recordings can take a while to transfer; don't abort early.
-            xhr.timeout = 10 * 60 * 1000;
+            xhr.open(method, url);
+            xhr.timeout = timeout;
+            Object.entries(headers).forEach(([k, v]) => {
+                if (v != null) xhr.setRequestHeader(k, v);
+            });
 
-            const progressBar = getEl('upload-progress');
-            const progressText = getEl('upload-progress-text');
-            if (progressBar) {
-                progressBar.style.display = 'block';
-                progressBar.value = 0;
+            if (onProgress) {
+                xhr.upload.onprogress = (e) => {
+                    if (e.lengthComputable) onProgress(e.loaded, e.total);
+                };
             }
 
-            xhr.upload.onprogress = (e) => {
-                if (e.lengthComputable) {
-                    const pct = Math.round((e.loaded / e.total) * 100);
-                    if (progressBar) progressBar.value = pct;
-                    if (progressText) progressText.textContent = `Uploading... ${pct}%`;
-                }
-            };
-
             xhr.onload = () => {
-                if (progressBar) progressBar.style.display = 'none';
-                if (progressText) progressText.textContent = '';
-                try {
-                    const data = JSON.parse(xhr.responseText);
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        resolve(data);
-                    } else {
-                        reject(new Error(data.error || `Upload failed (${xhr.status})`));
-                    }
-                } catch (e) {
-                    reject(new Error('Invalid response from server'));
+                const text = xhr.responseText || '';
+                let data = {};
+                try { data = text ? JSON.parse(text) : {}; } catch (e) { data = { raw: text }; }
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve({ status: xhr.status, data });
+                } else {
+                    reject(new Error(data.error || data.message || `Request failed (${xhr.status})`));
                 }
             };
-
-            xhr.onerror = () => {
-                if (progressBar) progressBar.style.display = 'none';
-                if (progressText) progressText.textContent = '';
-                reject(new Error('Upload failed — network error'));
-            };
-
-            xhr.ontimeout = () => {
-                if (progressBar) progressBar.style.display = 'none';
-                if (progressText) progressText.textContent = '';
-                reject(new Error('Upload timed out — your recording is still saved on this device'));
-            };
-
-            xhr.send(formData);
+            xhr.onerror = () => reject(new Error('Upload failed — network error'));
+            xhr.ontimeout = () => reject(new Error('Upload timed out — your recording is still saved on this device'));
+            xhr.send(body);
         });
     }
 
-    function buildUploadFormData() {
-        const mimeType = getMimeType();
-        const audioBlob = new Blob(allRecordedBlobs, { type: mimeType });
-        const fullTranscript = transcriptSegments.join('\n\n');
+    function setUploadProgress(pct, label) {
+        const progressBar = getEl('upload-progress');
+        const progressText = getEl('upload-progress-text');
+        if (progressBar) {
+            progressBar.style.display = 'block';
+            progressBar.value = Math.max(0, Math.min(100, pct));
+        }
+        if (progressText) progressText.textContent = label || `Uploading... ${Math.round(pct)}%`;
+    }
 
+    function hideUploadProgress() {
+        const progressBar = getEl('upload-progress');
+        const progressText = getEl('upload-progress-text');
+        if (progressBar) progressBar.style.display = 'none';
+        if (progressText) progressText.textContent = '';
+    }
+
+    async function saveMeetingMetadata(fullTranscript) {
         const formData = new FormData();
         formData.append('transcript', fullTranscript);
         formData.append('format', 'webm');
         formData.append('duration', String(elapsedSeconds));
-
-        if (audioBlob.size >= 1000) {
-            formData.append('audio', audioBlob, 'recording.webm');
-        }
         if (timedSegments.length > 0) {
             formData.append('segments', JSON.stringify(timedSegments));
         }
-        return { formData, audioBlob, fullTranscript, mimeType };
+        // Intentionally no audio — keep this request tiny so Railway never times out.
+        setUploadProgress(5, 'Saving transcript...');
+        const { data } = await xhrSend('/api/recordings/upload', {
+            method: 'POST',
+            body: formData,
+            timeout: 120000,
+        });
+        return data;
+    }
+
+    async function uploadAudioDirectToStorage(meetingId, audioBlob, mimeType) {
+        setUploadProgress(10, 'Preparing audio upload...');
+        const { data: uploadInfo } = await xhrSend(
+            `/api/recordings/${meetingId}/audio-upload-url`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mime_type: mimeType }),
+                timeout: 60000,
+            },
+        );
+
+        if (!uploadInfo.signed_url || !uploadInfo.token || !uploadInfo.path) {
+            throw new Error('Server did not return a valid upload URL');
+        }
+
+        // Direct to Supabase Storage — bypasses Railway's 5-minute HTTP limit.
+        // Matches storage3 upload_to_signed_url: PUT multipart with file field.
+        const formData = new FormData();
+        const filename = uploadInfo.path.split('/').pop() || 'recording.webm';
+        formData.append('cacheControl', '3600');
+        formData.append('file', audioBlob, filename);
+
+        let signedUrl = uploadInfo.signed_url;
+        // Prefer direct storage hostname for large uploads when available
+        try {
+            const u = new URL(signedUrl);
+            if (u.hostname.endsWith('.supabase.co') && !u.hostname.includes('.storage.')) {
+                const ref = u.hostname.split('.')[0];
+                u.hostname = `${ref}.storage.supabase.co`;
+                signedUrl = u.toString();
+            }
+        } catch (e) { /* keep original URL */ }
+
+        setUploadProgress(15, 'Uploading audio to storage...');
+        await xhrSend(signedUrl, {
+            method: 'PUT',
+            body: formData,
+            // No Content-Type header — browser sets multipart boundary
+            timeout: 30 * 60 * 1000,
+            onProgress: (loaded, total) => {
+                const pct = 15 + Math.round((loaded / total) * 75);
+                const mb = (loaded / (1024 * 1024)).toFixed(1);
+                const totalMb = (total / (1024 * 1024)).toFixed(1);
+                setUploadProgress(pct, `Uploading audio... ${mb}/${totalMb} MB`);
+            },
+        });
+
+        setUploadProgress(92, 'Finalizing audio...');
+        await xhrSend(`/api/recordings/${meetingId}/audio-complete`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                path: uploadInfo.path,
+                mime_type: mimeType,
+            }),
+            timeout: 60000,
+        });
+        setUploadProgress(100, 'Upload complete');
+    }
+
+    function startTitleGeneration(meetingId) {
+        const titleInput = getEl('meeting-title-input');
+        const spinner = getEl('title-spinner');
+        if (spinner) spinner.style.display = 'inline-flex';
+
+        titlePromise = fetch('/api/recordings/generate-title', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ meeting_id: meetingId }),
+        })
+            .then(r => r.json())
+            .then(result => {
+                if (result.title && titleInput && !titleInput.value.trim()) {
+                    titleInput.value = result.title;
+                }
+                if (spinner) spinner.style.display = 'none';
+                return result.title || null;
+            })
+            .catch(err => {
+                console.error('AI title generation failed:', err);
+                if (spinner) spinner.style.display = 'none';
+                return null;
+            });
     }
 
     async function createMeetingWithTranscript() {
         const fullTranscript = transcriptSegments.join('\n\n');
-        const hasAudio = allRecordedBlobs.length > 0
-            && new Blob(allRecordedBlobs).size >= 1000;
+        const mimeType = getMimeType();
+        const audioBlob = allRecordedBlobs.length
+            ? new Blob(allRecordedBlobs, { type: mimeType })
+            : null;
+        const hasAudio = !!(audioBlob && audioBlob.size >= 1000);
 
         if (!fullTranscript.trim() && !hasAudio) {
             showToast('No speech was detected and no audio was captured. Please try again.', 'error');
@@ -596,8 +679,6 @@ window.RecorderModule = (() => {
         }
 
         if (!fullTranscript.trim() && hasAudio) {
-            // Avoid server-side full-file Whisper on long recordings (timeout risk).
-            // Keep the audio draft so the user can download / retry later.
             lastUploadError = 'Live transcription did not produce text. Your audio is saved on this device.';
             hasRecoverableDraft = true;
             await persistDraft({ status: 'upload_failed', lastError: lastUploadError });
@@ -608,42 +689,56 @@ window.RecorderModule = (() => {
         }
 
         try {
-            setProcessingUi({ failed: false, message: 'Uploading recording...' });
-            const { formData } = buildUploadFormData();
+            setProcessingUi({ failed: false, message: 'Saving meeting...' });
+            await persistDraft({ status: 'uploading', meetingId: currentMeetingId });
 
-            await persistDraft({ status: 'uploading' });
-            const data = await uploadWithProgress(formData);
+            // 1) Tiny metadata request through Railway (always completes quickly)
+            if (!currentMeetingId) {
+                const data = await saveMeetingMetadata(fullTranscript);
+                currentMeetingId = data.meeting_id;
+                currentTranscript = data.transcript || fullTranscript;
+                await persistDraft({ status: 'uploading', meetingId: currentMeetingId });
+            } else {
+                currentTranscript = fullTranscript;
+            }
 
-            currentMeetingId = data.meeting_id;
-            currentTranscript = data.transcript || fullTranscript;
+            // 2) Large audio goes straight to Supabase (not through Railway)
+            if (hasAudio) {
+                try {
+                    await uploadAudioDirectToStorage(currentMeetingId, audioBlob, mimeType);
+                } catch (audioErr) {
+                    // Meeting + transcript are already saved — don't lose that.
+                    console.error('Direct audio upload failed:', audioErr);
+                    lastUploadError = audioErr.message || 'Audio upload failed';
+                    hasRecoverableDraft = true;
+                    await persistDraft({
+                        status: 'audio_upload_failed',
+                        meetingId: currentMeetingId,
+                        lastError: lastUploadError,
+                    });
+                    showToast(
+                        `Meeting saved, but audio upload failed: ${audioErr.message}. You can retry.`,
+                        'error',
+                    );
+                    setProcessingUi({
+                        failed: true,
+                        detail: `Transcript is saved. Audio failed: ${audioErr.message}`,
+                    });
+                    showState('processing');
+                    if (window.MeetingsModule && window.MeetingsModule.reload) {
+                        window.MeetingsModule.reload();
+                    }
+                    return;
+                }
+            }
+
+            hideUploadProgress();
             lastUploadError = null;
             hasRecoverableDraft = false;
             await clearDraft();
 
             if (getEl('meeting-title-input')) getEl('meeting-title-input').value = '';
-
-            const titleInput = getEl('meeting-title-input');
-            const spinner = getEl('title-spinner');
-            if (spinner) spinner.style.display = 'inline-flex';
-
-            titlePromise = fetch('/api/recordings/generate-title', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ meeting_id: currentMeetingId }),
-            })
-                .then(r => r.json())
-                .then(result => {
-                    if (result.title && titleInput && !titleInput.value.trim()) {
-                        titleInput.value = result.title;
-                    }
-                    if (spinner) spinner.style.display = 'none';
-                    return result.title || null;
-                })
-                .catch(err => {
-                    console.error('AI title generation failed:', err);
-                    if (spinner) spinner.style.display = 'none';
-                    return null;
-                });
+            startTitleGeneration(currentMeetingId);
 
             if (window.MeetingsModule && window.MeetingsModule.reload) {
                 window.MeetingsModule.reload();
@@ -653,9 +748,14 @@ window.RecorderModule = (() => {
             showTranscriptPreview(currentTranscript);
             showState('type-select');
         } catch (err) {
+            hideUploadProgress();
             lastUploadError = err.message || 'Upload failed';
             hasRecoverableDraft = true;
-            await persistDraft({ status: 'upload_failed', lastError: lastUploadError });
+            await persistDraft({
+                status: 'upload_failed',
+                meetingId: currentMeetingId,
+                lastError: lastUploadError,
+            });
             showToast(`Failed to save meeting: ${err.message}`, 'error');
             setProcessingUi({
                 failed: true,
@@ -666,7 +766,12 @@ window.RecorderModule = (() => {
     }
 
     async function retryUpload() {
-        setProcessingUi({ failed: false, message: 'Retrying upload...' });
+        setProcessingUi({
+            failed: false,
+            message: currentMeetingId
+                ? 'Retrying audio upload...'
+                : 'Retrying upload...',
+        });
         showState('processing');
         await createMeetingWithTranscript();
     }
