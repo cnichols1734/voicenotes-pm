@@ -3,6 +3,7 @@ VoiceNotes PM - Recordings CRUD + upload/transcribe/summarize routes.
 """
 import json
 import logging
+import threading
 import uuid
 from datetime import datetime
 
@@ -13,7 +14,9 @@ from flask_login import login_required, current_user
 from services.supabase_client import get_supabase
 from services.whisper_service import transcribe_audio, segments_to_text
 from services.summarizer_service import summarize_transcript
-from services.storage_service import upload_audio, get_signed_url, delete_audio
+from services.storage_service import (
+    upload_audio_raw, optimize_audio_to_mp3, get_signed_url, delete_audio,
+)
 from services.title_service import generate_title
 from services.action_items import (
     ensure_action_item_ids, update_action_item, create_action_item,
@@ -33,6 +36,45 @@ MAX_MEETING_SEARCH_LEN = 200
 
 def _supabase_error(message, status=503):
     return jsonify({"error": message}), status
+
+
+def _optimize_audio_background(user_id: str, meeting_id: str, audio_bytes: bytes, mime_type: str):
+    """Remux/transcode to MP3 after the raw file is already safely stored."""
+    try:
+        mp3_path = optimize_audio_to_mp3(user_id, meeting_id, audio_bytes, mime_type)
+        if not mp3_path:
+            return
+        get_supabase().table("meetings").update({
+            "audio_path": mp3_path,
+            "audio_mime_type": "audio/mpeg",
+        }).eq("id", meeting_id).eq("user_id", user_id).execute()
+        logger.info("Background MP3 optimization complete for meeting %s", meeting_id)
+    except Exception as exc:
+        logger.error("Background MP3 optimization failed for meeting %s: %s", meeting_id, exc)
+
+
+def _persist_audio_fast(user_id: str, meeting_id: str, audio_bytes: bytes, mime_type: str) -> bool:
+    """
+    Store raw audio during the request (fast), then optimize to MP3 in a
+    background thread. Returns True if raw upload succeeded.
+    """
+    try:
+        audio_path = upload_audio_raw(user_id, meeting_id, audio_bytes, mime_type)
+        get_supabase().table("meetings").update({
+            "audio_path": audio_path,
+            "audio_mime_type": mime_type,
+        }).eq("id", meeting_id).eq("user_id", user_id).execute()
+    except Exception as exc:
+        logger.error("Raw audio storage failed for meeting %s: %s", meeting_id, exc)
+        return False
+
+    threading.Thread(
+        target=_optimize_audio_background,
+        args=(user_id, meeting_id, audio_bytes, mime_type),
+        daemon=True,
+        name=f"audio-opt-{meeting_id[:8]}",
+    ).start()
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -227,29 +269,87 @@ def upload_recording():
         logger.error("Failed to save meeting after transcription: %s", exc)
         return _supabase_error(f"Failed to save meeting: {exc}")
 
-    # Upload audio to storage (non-blocking: meeting is saved even if storage fails)
+    # Persist raw audio quickly (no ffmpeg), then optimize to MP3 in background.
+    # Meeting row is already saved — client always gets meeting_id even if audio fails.
+    audio_stored = False
     audio_file = request.files.get("audio")
     if audio_file:
         audio_file.seek(0)
         audio_bytes = audio_file.read()
         if len(audio_bytes) >= 1000:
-            mime_type = audio_file.content_type or f"audio/{file_format}"
-            try:
-                audio_path = upload_audio(
+            if len(audio_bytes) > MAX_AUDIO_BYTES:
+                logger.warning(
+                    "Audio for meeting %s exceeds %s bytes — skipping storage",
+                    meeting["id"], MAX_AUDIO_BYTES,
+                )
+            else:
+                mime_type = audio_file.content_type or f"audio/{file_format}"
+                audio_stored = _persist_audio_fast(
                     str(current_user.id), meeting["id"], audio_bytes, mime_type,
                 )
-                stored_mime = "audio/mpeg" if audio_path.endswith(".mp3") else mime_type
-                supabase.table("meetings").update({
-                    "audio_path": audio_path,
-                    "audio_mime_type": stored_mime,
-                }).eq("id", meeting["id"]).execute()
-            except Exception as exc:
-                logger.error("Audio storage failed for meeting %s: %s", meeting["id"], exc)
 
     return jsonify({
         "meeting_id": meeting["id"],
         "transcript": transcript,
         "title": meeting["title"],
+        "audio_stored": audio_stored,
+    })
+
+
+# ---------------------------------------------------------------------------
+# POST /api/recordings/<meeting_id>/audio
+# ---------------------------------------------------------------------------
+@recordings_bp.route("/<meeting_id>/audio", methods=["POST"])
+@login_required
+def upload_meeting_audio(meeting_id):
+    """
+    Attach or re-upload audio for an existing meeting.
+    Used when the initial upload saved the transcript but audio storage failed,
+    or when the client retries after a network error.
+    """
+    try:
+        uuid.UUID(str(meeting_id))
+    except ValueError:
+        return jsonify({"error": "Invalid meeting_id"}), 400
+
+    if "audio" not in request.files:
+        return jsonify({"error": "No audio file provided"}), 400
+
+    audio_file = request.files["audio"]
+    audio_bytes = audio_file.read()
+    if len(audio_bytes) < 1000:
+        return jsonify({"error": "Recording too short."}), 400
+    if len(audio_bytes) > MAX_AUDIO_BYTES:
+        return jsonify({"error": "Audio file exceeds 100 MB limit."}), 413
+
+    file_format = request.form.get("format", "webm")
+    mime_type = audio_file.content_type or f"audio/{file_format}"
+
+    try:
+        supabase = get_supabase()
+        result = (
+            supabase.table("meetings")
+            .select("id")
+            .eq("id", meeting_id)
+            .eq("user_id", str(current_user.id))
+            .execute()
+        )
+        if not result.data:
+            return jsonify({"error": "Meeting not found"}), 404
+    except Exception as exc:
+        logger.error("Failed to verify meeting %s for audio upload: %s", meeting_id, exc)
+        return _supabase_error(f"Failed to verify meeting: {exc}")
+
+    audio_stored = _persist_audio_fast(
+        str(current_user.id), meeting_id, audio_bytes, mime_type,
+    )
+    if not audio_stored:
+        return jsonify({"error": "Failed to store audio"}), 502
+
+    return jsonify({
+        "meeting_id": meeting_id,
+        "audio_stored": True,
+        "message": "Audio stored; optimizing for playback in background.",
     })
 
 

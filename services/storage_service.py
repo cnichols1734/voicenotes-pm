@@ -149,6 +149,30 @@ def _source_format_from_mime(mime_type: str) -> str:
     return "webm"
 
 
+def upload_audio_raw(user_id: str, meeting_id: str, audio_bytes: bytes, mime_type: str) -> str:
+    """
+    Upload audio as-is (no remux/transcode). Fast path for the HTTP request
+    so the meeting is never lost waiting on ffmpeg.
+    """
+    _ensure_bucket()
+    source_fmt = _source_format_from_mime(mime_type)
+    ext = source_fmt if source_fmt in _SEEKABLE_FORMATS else (
+        "webm" if "webm" in mime_type else source_fmt
+    )
+    object_path = f"{user_id}/{meeting_id}.{ext}"
+    sb = get_supabase()
+    sb.storage.from_(BUCKET_NAME).upload(
+        path=object_path,
+        file=audio_bytes,
+        file_options={"content-type": mime_type, "upsert": "true"},
+    )
+    logger.info(
+        "Uploaded raw audio to %s/%s (%.1f MB).",
+        BUCKET_NAME, object_path, len(audio_bytes) / (1024 * 1024),
+    )
+    return object_path
+
+
 def upload_audio(user_id: str, meeting_id: str, audio_bytes: bytes, mime_type: str) -> str:
     """
     Upload audio bytes to Supabase Storage.
@@ -183,6 +207,46 @@ def upload_audio(user_id: str, meeting_id: str, audio_bytes: bytes, mime_type: s
     logger.info(
         "Uploaded audio to %s/%s (%.1f MB).",
         BUCKET_NAME, object_path, len(upload_bytes) / (1024 * 1024),
+    )
+    return object_path
+
+
+def optimize_audio_to_mp3(user_id: str, meeting_id: str, audio_bytes: bytes, mime_type: str) -> str | None:
+    """
+    Background optimization: remux concatenated WebM and replace with seekable MP3.
+    Returns the new object path, or None if optimization was skipped/failed.
+    """
+    source_fmt = _source_format_from_mime(mime_type)
+    if source_fmt in _SEEKABLE_FORMATS:
+        return None
+
+    try:
+        mp3_bytes = _transcode_to_mp3(audio_bytes, source_fmt)
+    except Exception as exc:
+        logger.error("MP3 optimization failed for meeting %s: %s", meeting_id, exc)
+        return None
+
+    _ensure_bucket()
+    object_path = f"{user_id}/{meeting_id}.mp3"
+    sb = get_supabase()
+    sb.storage.from_(BUCKET_NAME).upload(
+        path=object_path,
+        file=mp3_bytes,
+        file_options={"content-type": "audio/mpeg", "upsert": "true"},
+    )
+
+    # Best-effort cleanup of the raw upload
+    raw_ext = "webm" if "webm" in mime_type else source_fmt
+    raw_path = f"{user_id}/{meeting_id}.{raw_ext}"
+    if raw_path != object_path:
+        try:
+            sb.storage.from_(BUCKET_NAME).remove([raw_path])
+        except Exception:
+            pass
+
+    logger.info(
+        "Optimized audio to MP3 for meeting %s (%.1f MB).",
+        meeting_id, len(mp3_bytes) / (1024 * 1024),
     )
     return object_path
 
